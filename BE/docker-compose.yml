@@ -1,0 +1,36 @@
+services:
+  backend:
+    build: .
+    image: bms-backend:local
+    container_name: bms-backend
+    ports:
+      - "3001:3001"
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+    networks:
+      - bms-network
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: bms-postgres
+    environment:
+      POSTGRES_USER: bms_user
+      POSTGRES_PASSWORD: bms_password
+      POSTGRES_DB: bms_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - bms-network
+    restart: unless-stopped
+
+networks:
+  bms-network:
+    external: true
+
+volumes:
+  postgres-data:

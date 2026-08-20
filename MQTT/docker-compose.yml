@@ -1,0 +1,24 @@
+# mqtt/docker-compose.yml
+services:
+  mosquitto:
+    build: .
+    image: bms-mqtt:local
+    container_name: bms-mqtt
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./config/password_file:/mosquitto/config/password_file:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    networks:
+      - bms-network
+    restart: unless-stopped
+
+networks:
+  bms-network:
+    external: true
+
+volumes:
+  mosquitto-data:
+  mosquitto-log:

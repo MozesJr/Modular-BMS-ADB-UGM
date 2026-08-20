@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "ES2020",
+    "outDir": "dist",
+    "noEmit": false,
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": [
+    "src/server.ts",
+    "src/mqtt/**/*.ts",
+    "src/lib/**/*.ts",
+    "src/types/**/*.ts"
+  ],
+  "exclude": ["src/app/**"]
+}

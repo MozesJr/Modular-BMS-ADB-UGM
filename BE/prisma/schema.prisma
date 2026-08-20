@@ -1,0 +1,81 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  passwordHash  String
+  emailVerified DateTime?
+  role          Role      @default(USER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  devicesOwned        Device[]              @relation("DeviceOwner")
+  deviceCollaborations DeviceCollaborator[]
+  passwordResetTokens PasswordResetToken[]
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model Device {
+  id            String               @id
+  name          String?
+  ownerId       String
+  owner         User                 @relation("DeviceOwner", fields: [ownerId], references: [id])
+  verified      Boolean              @default(false)
+  collaborators DeviceCollaborator[]
+  createdAt     DateTime             @default(now())
+  packs         Pack[]
+}
+
+model DeviceCollaborator {
+  id       String   @id @default(cuid())
+  deviceId String
+  device   Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     String   @default("viewer") // viewer | editor
+  addedAt  DateTime @default(now())
+
+  @@unique([deviceId, userId])
+}
+
+model Pack {
+  id                String   @id @default(cuid())
+  index             Int
+  deviceId          String
+  device            Device   @relation(fields: [deviceId], references: [id])
+  temperature       Float?
+  balancerConnected Boolean  @default(false)
+  cells             Cell[]
+  updatedAt         DateTime @updatedAt
+}
+
+model Cell {
+  id        String   @id @default(cuid())
+  index     Int
+  packId    String
+  pack      Pack     @relation(fields: [packId], references: [id])
+  voltage   Float
+  updatedAt DateTime @updatedAt
+}
