@@ -8,7 +8,7 @@ Monorepo dengan 3 service independen, diorkestrasi lewat Docker Compose (`includ
 
 ┌─────────────┐ MQTT ┌─────────────┐ MQTT ┌──────────────┐
 │ ESP32 │ ─────publish──> │ MQTT/ │ <───subscribe── │ BE/ │
-│ Firmware │ bms/{id}/data │ Mosquitto │ │ Next.js API │
+│ Firmware │ bms/{id}/data │ Mosquitto │ │ BMS ADB API │
 └─────────────┘ └─────────────┘ │ + WS Server │
 └──────┬───────┘
 │
@@ -16,7 +16,7 @@ REST + WebSocket (/ws)
 │
 ┌──────▼───────┐
 │ FE/ │
-│ Next.js + │
+│ BMS ADB + │
 │ TailAdmin │
 └──────────────┘
 
@@ -34,16 +34,16 @@ Device (id, owner, verified, collaborators)
 
 .
 ├── docker-compose.yml # root orchestrator (pakai include:)
-├── FE/ # Frontend — Next.js + TailAdmin
-├── BE/ # Backend — Next.js Route Handlers + custom WS server + MQTT client
+├── FE/ # Frontend — BMS ADB + TailAdmin
+├── BE/ # Backend — BMS ADB Route Handlers + custom WS server + MQTT client
 └── MQTT/ # Mosquitto broker
 
 ## Stack
 
 | Layer       | Teknologi                                                          |
 | ----------- | ------------------------------------------------------------------ |
-| Frontend    | Next.js 16 (App Router), TailAdmin, TailwindCSS                    |
-| Backend     | Next.js Route Handlers (REST API) + custom Node server (WebSocket) |
+| Frontend    | BMS ADB 16 (App Router), TailAdmin, TailwindCSS                    |
+| Backend     | BMS ADB Route Handlers (REST API) + custom Node server (WebSocket) |
 | Auth        | Auth.js v5 (Credentials provider, JWT session)                     |
 | Database    | PostgreSQL + Prisma ORM                                            |
 | MQTT        | Mosquitto broker, `mqtt.js` client di backend                      |

@@ -8,9 +8,8 @@ import RecentOrders from "@/components/ecommerce/RecentOrders";
 import DemographicCard from "@/components/ecommerce/DemographicCard";
 
 export const metadata: Metadata = {
-  title:
-    "Next.js E-commerce Dashboard",
-  description: "This is Next.js Home for Modular Universal BMS Dashboard",
+  title: "BMS ADB E-commerce Dashboard",
+  description: "This is BMS ADB Home for Modular Universal BMS Dashboard",
 };
 
 export default function Ecommerce() {

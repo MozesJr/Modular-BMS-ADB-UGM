@@ -5,9 +5,9 @@ import { Metadata } from "next";
 import React from "react";
 
 export const metadata: Metadata = {
-  title: "Next.js Line Chart",
+  title: "BMS ADB Line Chart",
   description:
-    "This is Next.js Line Chart page for Modular Universal BMS - Next.js Tailwind CSS Admin Dashboard Template",
+    "This is BMS ADB Line Chart page for Modular Universal BMS - BMS ADB Tailwind CSS Admin Dashboard Template",
 };
 export default function LineChart() {
   return (

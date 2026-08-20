@@ -5,9 +5,9 @@ import Link from "next/link";
 import React from "react";
 
 export const metadata: Metadata = {
-  title: "Next.js Error 404",
+  title: "BMS ADB Error 404",
   description:
-    "This is Next.js Error 404 page for Modular Universal BMS - Next.js Tailwind CSS Admin Dashboard Template",
+    "This is BMS ADB Error 404 page for Modular Universal BMS - BMS ADB Tailwind CSS Admin Dashboard Template",
 };
 
 export default function Error404() {

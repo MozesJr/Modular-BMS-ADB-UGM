@@ -5,9 +5,9 @@ import { Metadata } from "next";
 import React from "react";
 
 export const metadata: Metadata = {
-  title: "Next.js Profile",
+  title: "BMS ADB Profile",
   description:
-    "This is Next.js Profile page for Modular Universal BMS - Next.js Tailwind CSS Admin Dashboard Template",
+    "This is BMS ADB Profile page for Modular Universal BMS - BMS ADB Tailwind CSS Admin Dashboard Template",
 };
 
 export default function Profile() {

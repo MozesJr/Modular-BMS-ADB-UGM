@@ -13,9 +13,9 @@ import { Metadata } from "next";
 import React from "react";
 
 export const metadata: Metadata = {
-  title: "Next.js Form Elements",
+  title: "BMS ADB Form Elements",
   description:
-    "This is Next.js Form Elements page for Modular Universal BMS - Next.js Tailwind CSS Admin Dashboard Template",
+    "This is BMS ADB Form Elements page for Modular Universal BMS - BMS ADB Tailwind CSS Admin Dashboard Template",
 };
 
 export default function FormElements() {
