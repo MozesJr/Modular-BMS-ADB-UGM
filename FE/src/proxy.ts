@@ -1,27 +1,31 @@
+// FE/src/proxy.ts
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
-
 
 const AUTH_PAGES = ["/signin", "/signup", "/forgot-password", "/reset-password"];
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  const token = await getToken({
-    req,
-    secret: process.env.NEXTAUTH_SECRET,
-  });
-  const isLoggedIn = !!token;
+  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
+  const isExpired =
+    token?.expiresAt != null && new Date(token.expiresAt as string) < new Date();
+  const isLoggedIn = !!token && !isExpired;
   const isAuthPage = AUTH_PAGES.some((p) => pathname.startsWith(p));
 
-  // Belum login, coba akses halaman selain auth → lempar ke /signin
   if (!isLoggedIn && !isAuthPage) {
-    return NextResponse.redirect(new URL("/signin", req.url));
+    const url = new URL("/signin", req.url);
+    if (isExpired) url.searchParams.set("reason", "expired");
+    return NextResponse.redirect(url);
   }
 
-  // Sudah login, tapi masih coba buka /signin atau /signup → lempar ke dashboard
   if (isLoggedIn && isAuthPage) {
+    return NextResponse.redirect(new URL("/", req.url));
+  }
+
+  // Proteksi khusus: /admin/* cuma boleh diakses role ADMIN
+  if (pathname.startsWith("/admin") && token?.role !== "ADMIN") {
     return NextResponse.redirect(new URL("/", req.url));
   }
 
@@ -29,8 +33,5 @@ export async function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    // jalan di semua route KECUALI file static/asset/api
-    "/((?!api|_next/static|_next/image|favicon.ico|images).*)",
-  ],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|images).*)"],
 };

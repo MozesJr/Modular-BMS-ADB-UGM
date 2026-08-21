@@ -19,12 +19,13 @@ model User {
   passwordHash  String
   emailVerified DateTime?
   role          Role      @default(USER)
+  expiresAt     DateTime? // null = tidak pernah expired
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  devicesOwned        Device[]              @relation("DeviceOwner")
+  devicesOwned         Device[]              @relation("DeviceOwner")
   deviceCollaborations DeviceCollaborator[]
-  passwordResetTokens PasswordResetToken[]
+  passwordResetTokens  PasswordResetToken[]
 }
 
 model PasswordResetToken {
@@ -64,7 +65,7 @@ model Pack {
   id                String   @id @default(cuid())
   index             Int
   deviceId          String
-  device            Device   @relation(fields: [deviceId], references: [id])
+  device            Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade) // ⬅️ tambah ini
   temperature       Float?
   balancerConnected Boolean  @default(false)
   cells             Cell[]
@@ -75,7 +76,7 @@ model Cell {
   id        String   @id @default(cuid())
   index     Int
   packId    String
-  pack      Pack     @relation(fields: [packId], references: [id])
+  pack      Pack     @relation(fields: [packId], references: [id], onDelete: Cascade) // ⬅️ tambah ini
   voltage   Float
   updatedAt DateTime @updatedAt
 }

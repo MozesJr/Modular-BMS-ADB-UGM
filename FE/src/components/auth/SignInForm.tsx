@@ -33,9 +33,12 @@ export default function SignInForm() {
       redirect: false,
     });
     setIsLoading(false);
-
     if (result?.error) {
-      setError("Email atau password salah.");
+      if (result.error === "account_expired") {
+        setError("Akun Anda sudah expired. Mohon hubungi admin.");
+      } else {
+        setError("Email atau password salah.");
+      }
       return;
     }
 

@@ -1,12 +1,16 @@
-import NextAuth from "next-auth";
+import NextAuth, { CredentialsSignin } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 
+class AccountExpiredError extends CredentialsSignin {
+  code = "account_expired";
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
   session: { strategy: "jwt" },
-  pages: { signIn: "/login" },
+  // pages: { signIn: "/login" },
   providers: [
     Credentials({
       credentials: {
@@ -24,11 +28,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const valid = await bcrypt.compare(password, user.passwordHash);
         if (!valid) return null;
 
+        if (user.expiresAt && user.expiresAt < new Date()) {
+          throw new AccountExpiredError();
+        }
+
         return {
           id: user.id,
           email: user.email,
           name: user.name,
           role: user.role,
+          expiresAt: user.expiresAt,
         };
       },
     }),
@@ -36,15 +45,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     jwt({ token, user }) {
       if (user) {
-        token.id = (user as any).id;
-        token.role = (user as any).role;
+        token.id = user.id;
+        token.role = user.role;
+        token.expiresAt = user.expiresAt ? user.expiresAt.toISOString() : null;
       }
       return token;
     },
     session({ session, token }) {
       if (session.user) {
-        (session.user as any).id = token.id;
-        (session.user as any).role = token.role;
+        session.user.id = token.id;
+        session.user.role = token.role;
+        session.user.expiresAt = token.expiresAt;
       }
       return session;
     },
