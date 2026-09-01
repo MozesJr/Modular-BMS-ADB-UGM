@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "next build && tsc -p tsconfig.server.json",
+    "build": "next build && tsc -p tsconfig.server.json && tsc-alias -p tsconfig.server.json",
     "start": "node dist/server.js",
     "lint": "next lint",
     "prisma:generate": "prisma generate",
