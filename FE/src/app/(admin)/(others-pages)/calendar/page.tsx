@@ -4,9 +4,9 @@ import { Metadata } from "next";
 import React from "react";
 
 export const metadata: Metadata = {
-  title: "BMS ADB Calender",
+  title: "GAMA BMS Calender",
   description:
-    "This is BMS ADB Calender page for Modular Universal BMS  Tailwind CSS Admin Dashboard Template",
+    "This is GAMA BMS Calender page for Modular Universal BMS  Tailwind CSS Admin Dashboard Template",
   // other metadata
 };
 export default function page() {

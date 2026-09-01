@@ -5,9 +5,9 @@ import { Metadata } from "next";
 import React from "react";
 
 export const metadata: Metadata = {
-  title: "BMS ADB Badge",
+  title: "GAMA BMS Badge",
   description:
-    "This is BMS ADB Badge page for Modular Universal BMS - BMS ADB Tailwind CSS Admin Dashboard Template",
+    "This is GAMA BMS Badge page for Modular Universal BMS - GAMA BMS Tailwind CSS Admin Dashboard Template",
   // other metadata
 };
 

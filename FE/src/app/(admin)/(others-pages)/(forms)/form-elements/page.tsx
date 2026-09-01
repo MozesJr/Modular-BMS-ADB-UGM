@@ -13,9 +13,9 @@ import { Metadata } from "next";
 import React from "react";
 
 export const metadata: Metadata = {
-  title: "BMS ADB Form Elements",
+  title: "GAMA BMS Form Elements",
   description:
-    "This is BMS ADB Form Elements page for Modular Universal BMS - BMS ADB Tailwind CSS Admin Dashboard Template",
+    "This is GAMA BMS Form Elements page for Modular Universal BMS - GAMA BMS Tailwind CSS Admin Dashboard Template",
 };
 
 export default function FormElements() {

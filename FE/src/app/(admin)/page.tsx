@@ -8,8 +8,8 @@ import RecentOrders from "@/components/ecommerce/RecentOrders";
 import DemographicCard from "@/components/ecommerce/DemographicCard";
 
 export const metadata: Metadata = {
-  title: "BMS ADB E-commerce Dashboard",
-  description: "This is BMS ADB Home for Modular Universal BMS Dashboard",
+  title: "GAMA BMS E-commerce Dashboard",
+  description: "This is GAMA BMS Home for Modular Universal BMS Dashboard",
 };
 
 export default function Ecommerce() {

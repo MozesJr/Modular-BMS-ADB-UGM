@@ -5,9 +5,9 @@ import { Metadata } from "next";
 import React from "react";
 
 export const metadata: Metadata = {
-  title: "BMS ADB Line Chart",
+  title: "GAMA BMS Line Chart",
   description:
-    "This is BMS ADB Line Chart page for Modular Universal BMS - BMS ADB Tailwind CSS Admin Dashboard Template",
+    "This is GAMA BMS Line Chart page for Modular Universal BMS - GAMA BMS Tailwind CSS Admin Dashboard Template",
 };
 export default function LineChart() {
   return (

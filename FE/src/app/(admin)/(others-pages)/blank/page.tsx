@@ -3,8 +3,8 @@ import { Metadata } from "next";
 import React from "react";
 
 export const metadata: Metadata = {
-  title: "BMS ADB Blank Page",
-  description: "This is BMS ADB Blank Page Modular Universal BMS Dashboard",
+  title: "GAMA BMS Blank Page",
+  description: "This is GAMA BMS Blank Page Modular Universal BMS Dashboard",
 };
 
 export default function BlankPage() {

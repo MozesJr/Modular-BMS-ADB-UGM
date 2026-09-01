@@ -4,9 +4,9 @@ import { Metadata } from "next";
 import React from "react";
 
 export const metadata: Metadata = {
-  title: "BMS ADB Videos",
+  title: "GAMA BMS Videos",
   description:
-    "This is BMS ADB Videos page for Modular Universal BMS - BMS ADB Tailwind CSS Admin Dashboard Template",
+    "This is GAMA BMS Videos page for Modular Universal BMS - GAMA BMS Tailwind CSS Admin Dashboard Template",
 };
 
 export default function VideoPage() {

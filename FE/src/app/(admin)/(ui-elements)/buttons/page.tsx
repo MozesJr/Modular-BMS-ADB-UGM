@@ -6,9 +6,9 @@ import { Metadata } from "next";
 import React from "react";
 
 export const metadata: Metadata = {
-  title: "BMS ADB Buttons",
+  title: "GAMA BMS Buttons",
   description:
-    "This is BMS ADB Buttons page for Modular Universal BMS - BMS ADB Tailwind CSS Admin Dashboard Template",
+    "This is GAMA BMS Buttons page for Modular Universal BMS - GAMA BMS Tailwind CSS Admin Dashboard Template",
 };
 
 export default function Buttons() {
