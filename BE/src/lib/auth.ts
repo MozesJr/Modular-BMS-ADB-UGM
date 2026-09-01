@@ -55,7 +55,7 @@ jwt({ token, user }) {
       if (session.user) {
         session.user.id = token.id;
         session.user.role = token.role;
-        session.user.expiresAt = token.expiresAt;
+        session.user.expiresAt = token.expiresAt as unknown as string | null;
       }
       return session;
     },
