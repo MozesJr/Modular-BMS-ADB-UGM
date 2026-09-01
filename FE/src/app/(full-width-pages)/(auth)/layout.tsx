@@ -25,7 +25,7 @@ export default function AuthLayout({
                   <Image
                     width={231}
                     height={48}
-                    src="/images/logo/LogoGamaBms1.png"
+                    src="/images/logo/LogoGamaBMSWhite1.png"
                     alt="Logo"
                   />
                 </Link>
