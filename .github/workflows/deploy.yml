@@ -17,7 +17,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
           script: |
-            cd ~/Modular-BMS-ADB-UGM
+            cd /home/Modular-BMS-ADB-UGM
             git pull origin main
             docker compose down
             docker compose up -d --build
