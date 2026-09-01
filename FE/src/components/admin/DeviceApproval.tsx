@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import Badge from "@/components/ui/badge/Badge";
+import { alertSuccess, alertError, alertConfirm } from "@/lib/alerts";
 
 type AdminDevice = {
   id: string;

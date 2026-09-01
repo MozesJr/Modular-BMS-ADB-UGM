@@ -10,6 +10,7 @@ import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import { useModal } from "@/hooks/useModal";
 import { Modal } from "@/components/ui/modal";
+import { alertSuccess, alertError, alertConfirm } from "@/lib/alerts";
 
 export default function DeviceDetail({ deviceId }: { deviceId: string }) {
   const { data: session } = useSession();

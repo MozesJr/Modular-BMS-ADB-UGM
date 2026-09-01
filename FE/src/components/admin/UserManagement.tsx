@@ -392,7 +392,7 @@ export default function UserManagement() {
               >
                 Batal
               </Button>
-              <Button size="sm" disabled={isSubmitting}>
+              <Button type="submit" size="sm" disabled={isSubmitting}>
                 {isSubmitting ? "Menyimpan..." : "Buat User"}
               </Button>
             </div>
@@ -481,8 +481,8 @@ export default function UserManagement() {
               >
                 Batal
               </Button>
-              <Button size="sm" disabled={isSubmitting}>
-                {isSubmitting ? "Menyimpan..." : "Simpan Perubahan"}
+              <Button type="submit" size="sm" disabled={isSubmitting}>
+                {isSubmitting ? "Menyimpan..." : "Buat User"}
               </Button>
             </div>
           </form>
