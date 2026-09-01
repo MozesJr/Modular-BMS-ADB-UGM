@@ -8,5 +8,6 @@
 #      "master_db" di VPS (cek: docker network ls / docker inspect master_postgresql)
 #   3. BE/.env.production dan FE/.env.production sudah diisi (cp dari *.env.production.example)
 include:
+  - MQTT/docker-compose.yml
   - BE/docker-compose.yml
   - FE/docker-compose.yml

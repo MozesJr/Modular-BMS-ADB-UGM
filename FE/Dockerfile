@@ -2,9 +2,11 @@ FROM node:20-alpine AS base
 WORKDIR /app
 
 FROM base AS deps
-COPY package.json package-lock.json* ./
+COPY package.json ./
 # next-auth beta belum declare peer range utk Next 16 (lihat README)
-RUN npm ci --legacy-peer-deps
+# package-lock.json sengaja TIDAK di-copy: lockfile digenerate di Mac (darwin-arm64),
+# sementara image ini Linux x64 — biarkan npm resolve dependency fresh untuk platform ini.
+RUN npm install --legacy-peer-deps
 
 FROM base AS builder
 # BACKEND_URL dipakai di next.config.ts rewrites() — dengan output:"standalone",
