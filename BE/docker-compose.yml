@@ -1,36 +1,31 @@
+# BE/docker-compose.yml
+#
+# Tidak ada service Postgres/Mosquitto lokal di sini — BE connect ke:
+#   - master_postgresql (container Postgres yang sudah jalan di VPS, project "master_db")
+#   - bms_mosquitto     (container Mosquitto yang sudah jalan di VPS, project "master_db")
+# lewat network eksternal "master-db-network" (lihat MASTER_DB_NETWORK di bawah).
 services:
   backend:
     build: .
     image: bms-backend:local
     container_name: bms-backend
-    ports:
-      - "3001:3001"
     env_file:
-      - .env
-    depends_on:
-      - postgres
+      - .env.production
     networks:
       - bms-network
+      - master-db-network
     restart: unless-stopped
-
-  postgres:
-    image: postgres:16-alpine
-    container_name: bms-postgres
-    environment:
-      POSTGRES_USER: bms_user
-      POSTGRES_PASSWORD: bms_password
-      POSTGRES_DB: bms_db
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    networks:
-      - bms-network
-    restart: unless-stopped
+    # BE tidak perlu diexpose ke publik (FE yang jadi entry point, proxy internal via rewrites()).
+    # Buka port ini hanya untuk debugging lokal di VPS, dan hanya ke loopback:
+    # ports:
+    #   - "127.0.0.1:4000:4000"
 
 networks:
   bms-network:
     external: true
-
-volumes:
-  postgres-data:
+  master-db-network:
+    external: true
+    # Isi MASTER_DB_NETWORK di root .env (lihat instruksi deploy) dengan nama network
+    # Docker yang dipakai project "master_db" di VPS — cek dengan `docker network ls`
+    # dan `docker inspect master_postgresql`.
+    name: ${MASTER_DB_NETWORK:-master_db_default}

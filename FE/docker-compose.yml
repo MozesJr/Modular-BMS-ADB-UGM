@@ -1,0 +1,21 @@
+# FE/docker-compose.yml
+services:
+  frontend:
+    build:
+      context: .
+      args:
+        BACKEND_URL: http://backend:4000
+    image: bms-frontend:local
+    container_name: bms-frontend
+    ports:
+      # Bind ke loopback saja — akses publik lewat Nginx (lihat deploy/nginx), bukan langsung.
+      - "127.0.0.1:3001:3001"
+    env_file:
+      - .env.production
+    networks:
+      - bms-network
+    restart: unless-stopped
+
+networks:
+  bms-network:
+    external: true

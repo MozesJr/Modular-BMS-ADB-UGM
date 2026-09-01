@@ -1,0 +1,6 @@
+# Root .env — hanya berisi MASTER_DB_NETWORK (nama, bukan secret) tapi tetap jangan di-commit
+# supaya nilai per-VPS tidak ketimpa oleh nilai default di repo.
+.env
+.env.production
+.env.local
+.DS_Store

@@ -1,0 +1,12 @@
+# Root orchestrator — gabungkan FE + BE lewat include:
+# MQTT/ sengaja tidak di-include: broker Mosquitto sudah jalan di VPS (project "master_db"),
+# bukan container yang dikelola dari monorepo ini.
+#
+# Prasyarat sebelum `docker compose up`:
+#   1. docker network create bms-network          (sekali saja, kalau belum ada)
+#   2. Set MASTER_DB_NETWORK di .env di folder ini, isi nama network Docker project
+#      "master_db" di VPS (cek: docker network ls / docker inspect master_postgresql)
+#   3. BE/.env.production dan FE/.env.production sudah diisi (cp dari *.env.production.example)
+include:
+  - BE/docker-compose.yml
+  - FE/docker-compose.yml

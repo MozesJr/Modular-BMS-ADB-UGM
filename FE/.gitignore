@@ -29,6 +29,10 @@ yarn-error.log*
 # local env files
 .env*.local
 
+# production env (real secrets) — never commit, only .env.production.example is tracked
+.env
+.env.production
+
 # vercel
 .vercel
 
