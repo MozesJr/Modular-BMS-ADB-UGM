@@ -20,8 +20,9 @@ export function registerMqttSubscriber() {
 
   client.on("connect", () => {
     console.log("[mqtt] connected");
-    client!.subscribe("bms/+/data", { qos: 1 }, (err) => {
+    client!.subscribe("bms/+/data", { qos: 1 }, (err, granted) => {
       if (err) console.error("[mqtt] subscribe error", err);
+      else console.log("[mqtt] subscribed", (granted ?? []).map((g) => `${g.topic} (qos ${g.qos})`).join(", "));
     });
   });
 
@@ -39,6 +40,11 @@ export function registerMqttSubscriber() {
   });
 
   client.on("error", (err) => console.error("[mqtt] error", err));
+  // Lifecycle koneksi broker — low-frequency, penting buat diagnosa "kenapa data berhenti masuk"
+  // tanpa harus nunggu ada error eksplisit (mis. network putus tapi belum reconnect).
+  client.on("reconnect", () => console.log("[mqtt] reconnecting..."));
+  client.on("close", () => console.log("[mqtt] connection closed"));
+  client.on("offline", () => console.log("[mqtt] client offline"));
 
   return client;
 }

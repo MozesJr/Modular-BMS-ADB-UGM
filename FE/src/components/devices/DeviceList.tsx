@@ -17,7 +17,7 @@ export default function DeviceList() {
   const [error, setError] = useState<string | null>(null);
 
   const { isOpen, openModal, closeModal } = useModal();
-  const [newId, setNewId] = useState("");
+  const [newSerialNumber, setNewSerialNumber] = useState("");
   const [newName, setNewName] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -45,7 +45,7 @@ export default function DeviceList() {
     e.preventDefault();
     setFormError(null);
 
-    if (!newId.trim()) {
+    if (!newSerialNumber.trim()) {
       setFormError("Device ID / lisensi wajib diisi.");
       return;
     }
@@ -53,16 +53,16 @@ export default function DeviceList() {
     setIsSubmitting(true);
     try {
       await api.post("/devices", {
-        id: newId.trim(),
+        serialNumber: newSerialNumber.trim(),
         name: newName.trim() || undefined,
       });
-      setNewId("");
+      setNewSerialNumber("");
       setNewName("");
       closeModal();
       await loadDevices();
       alertSuccess(
         "Device ditambahkan",
-        `Device "${newId.trim()}" menunggu verifikasi admin.`,
+        `Device "${newSerialNumber.trim()}" menunggu verifikasi admin.`,
       );
     } catch (err) {
       const message =
@@ -117,7 +117,7 @@ export default function DeviceList() {
           >
             <div className="flex items-start justify-between mb-2">
               <h4 className="font-medium text-gray-800 dark:text-white/90">
-                {device.name || device.id}
+                {device.name || device.serialNumber}
               </h4>
               {device.verified ? (
                 <Badge color="success">Verified</Badge>
@@ -126,7 +126,7 @@ export default function DeviceList() {
               )}
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 font-mono mb-3">
-              {device.id}
+              {device.serialNumber}
             </p>
             <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
               <span>{device.packs.length} pack</span>
@@ -160,8 +160,8 @@ export default function DeviceList() {
               <Input
                 type="text"
                 placeholder="mis. esp32-bms-001"
-                value={newId}
-                onChange={(e) => setNewId(e.target.value)}
+                value={newSerialNumber}
+                onChange={(e) => setNewSerialNumber(e.target.value)}
               />
             </div>
             <div>

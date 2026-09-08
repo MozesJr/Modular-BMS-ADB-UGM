@@ -7,10 +7,11 @@ import { alertSuccess, alertError, alertConfirm } from "@/lib/alerts";
 
 type AdminDevice = {
   id: string;
+  serialNumber: string;
   name: string | null;
   verified: boolean;
   createdAt: string;
-  owner: { id: string; name: string | null; email: string };
+  owner: { id: string; name: string | null; email: string } | null;
 };
 
 export default function DeviceApproval() {
@@ -174,7 +175,7 @@ export default function DeviceApproval() {
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <span className="font-medium text-gray-800 dark:text-white/90">
-                  {device.name || device.id}
+                  {device.name || device.serialNumber}
                 </span>
                 {device.verified ? (
                   <Badge color="success">Verified</Badge>
@@ -183,10 +184,13 @@ export default function DeviceApproval() {
                 )}
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400 font-mono">
-                {device.id}
+                {device.serialNumber}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Owner: {device.owner.name || device.owner.email}
+                Owner:{" "}
+                {device.owner
+                  ? device.owner.name || device.owner.email
+                  : "— (belum diklaim, data masuk otomatis dari MQTT)"}
               </p>
             </div>
 

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { api, ApiError } from "@/lib/api";
-import { Device } from "@/types/device";
+import { BmsUpdatePayload, Device, Pack } from "@/types/device";
 import Badge from "@/components/ui/badge/Badge";
 import Button from "@/components/ui/button/Button";
 import Input from "@/components/form/input/InputField";
@@ -11,12 +11,51 @@ import Label from "@/components/form/Label";
 import { useModal } from "@/hooks/useModal";
 import { Modal } from "@/components/ui/modal";
 import { alertSuccess, alertError, alertConfirm } from "@/lib/alerts";
+import { useBmsSocket } from "@/hooks/useBmsSocket";
+import DeviceHistoryCharts from "@/components/devices/DeviceHistoryCharts";
+
+// Terapkan update MQTT real-time (via WS) ke state device yang sudah dimuat lewat REST.
+// Pack/cell di-upsert by index (bukan by db id, karena payload WS gak bawa db id).
+function applyRealtimeUpdate(prev: Device, update: BmsUpdatePayload): Device {
+  const packsByIndex = new Map(prev.packs.map((p) => [p.index, p]));
+
+  for (const incomingPack of update.packs) {
+    const existingPack = packsByIndex.get(incomingPack.index);
+    const cellsByIndex = new Map((existingPack?.cells ?? []).map((c) => [c.index, c]));
+
+    for (const incomingCell of incomingPack.cells) {
+      const existingCell = cellsByIndex.get(incomingCell.index);
+      cellsByIndex.set(incomingCell.index, {
+        id: existingCell?.id ?? `local-cell-${incomingPack.index}-${incomingCell.index}`,
+        index: incomingCell.index,
+        voltage: incomingCell.voltage,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    const mergedPack: Pack = {
+      id: existingPack?.id ?? `local-pack-${incomingPack.index}`,
+      index: incomingPack.index,
+      temperature: incomingPack.temperature,
+      balancerConnected: incomingPack.balancerConnected,
+      cells: Array.from(cellsByIndex.values()).sort((a, b) => a.index - b.index),
+      updatedAt: new Date().toISOString(),
+    };
+    packsByIndex.set(incomingPack.index, mergedPack);
+  }
+
+  return {
+    ...prev,
+    packs: Array.from(packsByIndex.values()).sort((a, b) => a.index - b.index),
+  };
+}
 
 export default function DeviceDetail({ deviceId }: { deviceId: string }) {
   const { data: session } = useSession();
   const [device, setDevice] = useState<Device | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdateAt, setLastUpdateAt] = useState<Date | null>(null);
 
   const { isOpen, openModal, closeModal } = useModal();
   const [inviteEmail, setInviteEmail] = useState("");
@@ -42,6 +81,12 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
     loadDevice();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceId]);
+
+  useBmsSocket((update) => {
+    if (update.id !== deviceId) return; // broadcast global, filter punya device ini aja
+    setDevice((prev) => (prev ? applyRealtimeUpdate(prev, update) : prev));
+    setLastUpdateAt(new Date());
+  });
 
   const isOwner = device?.ownerId === session?.user?.id;
 
@@ -131,20 +176,30 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
             <h3 className="text-lg font-semibold text-gray-800 dark:text-white/90">
-              {device.name || device.id}
+              {device.name || device.serialNumber}
             </h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">
-              {device.id}
+              {device.serialNumber}
             </p>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Owner: {device.owner.name || device.owner.email}
+              Owner:{" "}
+              {device.owner
+                ? device.owner.name || device.owner.email
+                : "— (belum diklaim)"}
             </p>
           </div>
-          {device.verified ? (
-            <Badge color="success">Verified</Badge>
-          ) : (
-            <Badge color="warning">Pending Verifikasi</Badge>
-          )}
+          <div className="flex items-center gap-2">
+            {lastUpdateAt && (
+              <Badge color="success">
+                Live · {lastUpdateAt.toLocaleTimeString("id-ID")}
+              </Badge>
+            )}
+            {device.verified ? (
+              <Badge color="success">Verified</Badge>
+            ) : (
+              <Badge color="warning">Pending Verifikasi</Badge>
+            )}
+          </div>
         </div>
       </div>
 
@@ -163,7 +218,7 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
           <div className="space-y-4">
             {device.packs.map((pack) => (
               <div
-                key={pack.id}
+                key={pack.index}
                 className="rounded-xl border border-gray-200 dark:border-gray-800 p-4"
               >
                 <div className="flex items-center justify-between mb-3">
@@ -182,7 +237,7 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
                 <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2">
                   {pack.cells.map((cell) => (
                     <div
-                      key={cell.id}
+                      key={cell.index}
                       className="rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-2 text-center"
                     >
                       <p className="text-[10px] text-gray-500 dark:text-gray-400">
@@ -199,6 +254,9 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
           </div>
         )}
       </div>
+
+      {/* History */}
+      <DeviceHistoryCharts deviceId={deviceId} />
 
       {/* Collaborators */}
       <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] lg:p-6">
