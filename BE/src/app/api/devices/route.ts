@@ -23,25 +23,37 @@ export async function GET() {
   return NextResponse.json(devices);
 }
 
-// POST: user daftarin device baru pakai ID/lisensi dari perangkat fisik — status verified=false sampai admin approve
+// POST: user daftarin device baru pakai ID/lisensi dari perangkat fisik (serialNumber) —
+// status verified=false sampai admin approve. Kalau device itu udah pernah publish data
+// lewat MQTT sebelum diklaim siapapun (auto-provisioned, ownerId masih null), klaim
+// row yang sudah ada itu alih-alih bikin duplikat.
 export async function POST(req: Request) {
   const session = await requireAuth();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { id, name } = await req.json();
+  const { serialNumber, name } = await req.json();
 
-  if (!id) {
+  if (!serialNumber) {
     return NextResponse.json({ error: "Device ID/lisensi wajib diisi" }, { status: 400 });
   }
 
-  const existing = await prisma.device.findUnique({ where: { id } });
+  const existing = await prisma.device.findUnique({ where: { serialNumber } });
+
   if (existing) {
-    return NextResponse.json({ error: "Device ID sudah terdaftar" }, { status: 409 });
+    if (existing.ownerId) {
+      return NextResponse.json({ error: "Device ID sudah terdaftar" }, { status: 409 });
+    }
+
+    const claimed = await prisma.device.update({
+      where: { id: existing.id },
+      data: { ownerId: session.user.id, name: name ?? existing.name },
+    });
+    return NextResponse.json(claimed, { status: 200 });
   }
 
   const device = await prisma.device.create({
     data: {
-      id,
+      serialNumber,
       name,
       ownerId: session.user.id,
       verified: false,

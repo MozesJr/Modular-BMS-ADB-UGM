@@ -39,14 +39,20 @@ model PasswordResetToken {
 }
 
 model Device {
-  id            String               @id
+  id            String               @id @default(cuid())
+  // serialNumber = device_id dari topik MQTT ("bms/{device_id}/data"), BUKAN PK.
+  // Diisi manual oleh user saat daftarin device (ID/lisensi fisik perangkat).
+  serialNumber  String               @unique
   name          String?
-  ownerId       String
-  owner         User                 @relation("DeviceOwner", fields: [ownerId], references: [id])
+  // null = device belum diklaim/didaftarin user manapun (auto-provisioned dari ingestion MQTT).
+  ownerId       String?
+  owner         User?                @relation("DeviceOwner", fields: [ownerId], references: [id])
   verified      Boolean              @default(false)
   collaborators DeviceCollaborator[]
   createdAt     DateTime             @default(now())
   packs         Pack[]
+  packHistory   PackHistory[]
+  cellHistory   CellHistory[]
 }
 
 model DeviceCollaborator {
@@ -61,22 +67,58 @@ model DeviceCollaborator {
   @@unique([deviceId, userId])
 }
 
+// Latest state per pack — di-upsert tiap message MQTT masuk, buat tampilan real-time.
 model Pack {
   id                String   @id @default(cuid())
   index             Int
   deviceId          String
-  device            Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade) // ⬅️ tambah ini
+  device            Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   temperature       Float?
   balancerConnected Boolean  @default(false)
   cells             Cell[]
   updatedAt         DateTime @updatedAt
+
+  @@unique([deviceId, index])
 }
 
+// Latest state per cell — di-upsert tiap message MQTT masuk, buat tampilan real-time.
 model Cell {
   id        String   @id @default(cuid())
   index     Int
   packId    String
-  pack      Pack     @relation(fields: [packId], references: [id], onDelete: Cascade) // ⬅️ tambah ini
+  pack      Pack     @relation(fields: [packId], references: [id], onDelete: Cascade)
   voltage   Float
   updatedAt DateTime @updatedAt
+
+  @@unique([packId, index])
+}
+
+// Time-series history per pack, buat grafik tren. Insert baru tiap message MQTT masuk
+// (bukan upsert) — satu row per snapshot. Referensi ke Device by id (bukan ke Pack latest-state)
+// karena jumlah pack per device dinamis dan row Pack latest-state bisa berubah/hilang.
+model PackHistory {
+  id                String   @id @default(cuid())
+  deviceId          String
+  device            Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  packIndex         Int
+  temperature       Float?
+  balancerConnected Boolean
+  recordedAt        DateTime // dari payload.timestamp (waktu firmware), bukan waktu insert DB
+  createdAt         DateTime @default(now())
+
+  @@index([deviceId, packIndex, recordedAt])
+}
+
+// Time-series history per cell, buat grafik tren.
+model CellHistory {
+  id         String   @id @default(cuid())
+  deviceId   String
+  device     Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  packIndex  Int
+  cellIndex  Int
+  voltage    Float
+  recordedAt DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([deviceId, packIndex, cellIndex, recordedAt])
 }
