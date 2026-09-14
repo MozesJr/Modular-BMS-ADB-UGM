@@ -328,6 +328,35 @@
   @apply !stroke-gray-100 dark:!stroke-gray-800;
 }
 
+.apexcharts-menu-icon svg,
+.apexcharts-reset-icon svg,
+.apexcharts-zoom-icon svg,
+.apexcharts-zoomin-icon svg,
+.apexcharts-zoomout-icon svg {
+  @apply !fill-gray-500 dark:!fill-gray-400;
+}
+.apexcharts-pan-icon svg {
+  @apply !fill-white dark:!fill-gray-800 !stroke-gray-500 dark:!stroke-gray-400;
+}
+.apexcharts-menu-icon:hover svg,
+.apexcharts-reset-icon:hover svg,
+.apexcharts-zoom-icon:not(.apexcharts-selected):hover svg,
+.apexcharts-zoomin-icon:hover svg,
+.apexcharts-zoomout-icon:hover svg,
+.apexcharts-pan-icon:not(.apexcharts-selected):hover svg {
+  @apply !fill-gray-700 dark:!fill-gray-200 !stroke-gray-700 dark:!stroke-gray-200;
+}
+.apexcharts-zoom-icon.apexcharts-selected svg,
+.apexcharts-pan-icon.apexcharts-selected svg {
+  @apply !fill-brand-500 !stroke-brand-500;
+}
+.apexcharts-menu {
+  @apply !border-gray-200 !bg-white dark:!border-gray-800 dark:!bg-gray-900;
+}
+.apexcharts-menu-item:hover {
+  @apply !bg-gray-100 dark:!bg-white/5;
+}
+
 .flatpickr-wrapper {
   @apply w-full;
 }

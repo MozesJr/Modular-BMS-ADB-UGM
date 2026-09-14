@@ -12,7 +12,13 @@ import { useModal } from "@/hooks/useModal";
 import { Modal } from "@/components/ui/modal";
 import { alertSuccess, alertError, alertConfirm } from "@/lib/alerts";
 import { useBmsSocket } from "@/hooks/useBmsSocket";
+import { useDeviceHistory } from "@/hooks/useDeviceHistory";
 import DeviceHistoryCharts from "@/components/devices/DeviceHistoryCharts";
+import PackCard from "@/components/devices/PackCard";
+
+// Window kecil khusus buat sparkline per-cell — dipisah dari rentang chart utama
+// (yang dipilih user via tab di DeviceHistoryCharts) biar sparkline tetap "tren terkini".
+const SPARKLINE_WINDOW_HOURS = 6;
 
 // Terapkan update MQTT real-time (via WS) ke state device yang sudah dimuat lewat REST.
 // Pack/cell di-upsert by index (bukan by db id, karena payload WS gak bawa db id).
@@ -50,12 +56,16 @@ function applyRealtimeUpdate(prev: Device, update: BmsUpdatePayload): Device {
   };
 }
 
+const LIVE_THRESHOLD_MS = 30_000;
+
 export default function DeviceDetail({ deviceId }: { deviceId: string }) {
   const { data: session } = useSession();
   const [device, setDevice] = useState<Device | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdateAt, setLastUpdateAt] = useState<Date | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const { history: sparklineHistory } = useDeviceHistory(deviceId, SPARKLINE_WINDOW_HOURS);
 
   const { isOpen, openModal, closeModal } = useModal();
   const [inviteEmail, setInviteEmail] = useState("");
@@ -87,6 +97,21 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
     setDevice((prev) => (prev ? applyRealtimeUpdate(prev, update) : prev));
     setLastUpdateAt(new Date());
   });
+
+  // Status live/offline dihitung dari selisih waktu, jadi perlu re-render berkala
+  // walau tidak ada pesan WS baru (mis. saat koneksi putus).
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Sebelum ada pesan WS pertama, pakai updatedAt pack dari REST (data DB asli) sebagai baseline.
+  const initialLastUpdateAt =
+    device && device.packs.length > 0
+      ? new Date(Math.max(...device.packs.map((p) => new Date(p.updatedAt).getTime())))
+      : null;
+  const effectiveLastUpdateAt = lastUpdateAt ?? initialLastUpdateAt;
+  const isLive = effectiveLastUpdateAt != null && now - effectiveLastUpdateAt.getTime() < LIVE_THRESHOLD_MS;
 
   const isOwner = device?.ownerId === session?.user?.id;
 
@@ -189,9 +214,23 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {lastUpdateAt && (
-              <Badge color="success">
-                Live · {lastUpdateAt.toLocaleTimeString("id-ID")}
+            {effectiveLastUpdateAt && (
+              <Badge
+                color={isLive ? "success" : "error"}
+                startIcon={
+                  <span className="relative flex h-2 w-2">
+                    {isLive && (
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success-400 opacity-75" />
+                    )}
+                    <span
+                      className={`relative inline-flex h-2 w-2 rounded-full ${
+                        isLive ? "bg-success-500" : "bg-error-500"
+                      }`}
+                    />
+                  </span>
+                }
+              >
+                {isLive ? "Live" : "Offline"} · {effectiveLastUpdateAt.toLocaleTimeString("id-ID")}
               </Badge>
             )}
             {device.verified ? (
@@ -215,40 +254,16 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
             mengirim data via MQTT.
           </p>
         ) : (
-          <div className="space-y-4">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {device.packs.map((pack) => (
               <div
                 key={pack.index}
-                className="rounded-xl border border-gray-200 dark:border-gray-800 p-4"
+                className={device.packs.length === 1 ? "xl:col-span-2" : undefined}
               >
-                <div className="flex items-center justify-between mb-3">
-                  <span className="font-medium text-gray-800 dark:text-white/90">
-                    Pack #{pack.index}
-                  </span>
-                  <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
-                    <span>
-                      {pack.temperature != null ? `${pack.temperature}°C` : "—"}
-                    </span>
-                    <Badge color={pack.balancerConnected ? "success" : "error"}>
-                      Balancer {pack.balancerConnected ? "OK" : "Off"}
-                    </Badge>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2">
-                  {pack.cells.map((cell) => (
-                    <div
-                      key={cell.index}
-                      className="rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-2 text-center"
-                    >
-                      <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                        Cell {cell.index}
-                      </p>
-                      <p className="text-sm font-medium text-gray-800 dark:text-white/90">
-                        {cell.voltage.toFixed(3)}V
-                      </p>
-                    </div>
-                  ))}
-                </div>
+                <PackCard
+                  pack={pack}
+                  history={sparklineHistory?.packs.find((p) => p.index === pack.index) ?? null}
+                />
               </div>
             ))}
           </div>
