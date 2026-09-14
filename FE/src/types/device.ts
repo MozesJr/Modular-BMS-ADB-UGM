@@ -11,6 +11,9 @@ export type Pack = {
   index: number;
   temperature: number | null;
   balancerConnected: boolean;
+  // null = device lama belum kirim field ini di payload MQTT.
+  current: number | null; // Ampere — negatif = charging, positif = discharging
+  power: number | null; // Watt, = voltage_pack x current
   cells: Cell[];
   updatedAt: string;
 };
@@ -83,6 +86,9 @@ export type BmsUpdatePayload = {
     index: number;
     temperature: number;
     balancerConnected: boolean;
+    // Opsional: device lama belum kirim field ini.
+    current?: number;
+    power?: number;
     cells: { index: number; voltage: number }[];
   }[];
 };

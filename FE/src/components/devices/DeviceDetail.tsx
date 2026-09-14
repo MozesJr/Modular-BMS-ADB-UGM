@@ -15,10 +15,63 @@ import { useBmsSocket } from "@/hooks/useBmsSocket";
 import { useDeviceHistory } from "@/hooks/useDeviceHistory";
 import DeviceHistoryCharts from "@/components/devices/DeviceHistoryCharts";
 import PackCard from "@/components/devices/PackCard";
+import AvatarText from "@/components/ui/avatar/AvatarText";
+import { CopyIcon, CheckLineIcon } from "@/icons";
 
 // Window kecil khusus buat sparkline per-cell — dipisah dari rentang chart utama
 // (yang dipilih user via tab di DeviceHistoryCharts) biar sparkline tetap "tren terkini".
 const SPARKLINE_WINDOW_HOURS = 6;
+
+// Ikon belum ada di src/icons — dibikin inline pakai primitif SVG (garis/lingkaran) biar
+// bentuknya presisi, ikut konvensi inline-SVG yang sudah dipakai AppHeader.tsx.
+function RefreshIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <polyline points="23 4 23 10 17 10" />
+      <polyline points="1 20 1 14 7 14" />
+      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+    </svg>
+  );
+}
+
+function SettingsIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={className}>
+      <line x1="4" y1="6" x2="20" y2="6" />
+      <circle cx="9" cy="6" r="2" fill="currentColor" stroke="none" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <circle cx="15" cy="12" r="2" fill="currentColor" stroke="none" />
+      <line x1="4" y1="18" x2="20" y2="18" />
+      <circle cx="7" cy="18" r="2" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function ShareIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={className}>
+      <circle cx="18" cy="5" r="2.5" />
+      <circle cx="6" cy="12" r="2.5" />
+      <circle cx="18" cy="19" r="2.5" />
+      <line x1="8.3" y1="10.7" x2="15.7" y2="6.3" />
+      <line x1="8.3" y1="13.3" x2="15.7" y2="17.7" />
+    </svg>
+  );
+}
+
+function truncateMiddle(value: string, headLen = 10, tailLen = 6) {
+  if (value.length <= headLen + tailLen + 1) return value;
+  return `${value.slice(0, headLen)}…${value.slice(-tailLen)}`;
+}
+
+function formatLastSeen(ms: number) {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ago`;
+}
 
 // Terapkan update MQTT real-time (via WS) ke state device yang sudah dimuat lewat REST.
 // Pack/cell di-upsert by index (bukan by db id, karena payload WS gak bawa db id).
@@ -44,6 +97,8 @@ function applyRealtimeUpdate(prev: Device, update: BmsUpdatePayload): Device {
       index: incomingPack.index,
       temperature: incomingPack.temperature,
       balancerConnected: incomingPack.balancerConnected,
+      current: incomingPack.current ?? null,
+      power: incomingPack.power ?? null,
       cells: Array.from(cellsByIndex.values()).sort((a, b) => a.index - b.index),
       updatedAt: new Date().toISOString(),
     };
@@ -56,7 +111,11 @@ function applyRealtimeUpdate(prev: Device, update: BmsUpdatePayload): Device {
   };
 }
 
-const LIVE_THRESHOLD_MS = 30_000;
+// 2x PUBLISH_INTERVAL publisher (60s) — toleran ke satu siklus publish yang telat/miss
+// tanpa langsung kelihatan "Offline" palsu.
+const LIVE_THRESHOLD_MS = 120_000;
+// Voltage nominal per cell LiFePO4 (BUKAN reading live — itu ada di gauge Voltage Pack section bawah).
+const NOMINAL_LIFEPO4_V_PER_CELL = 3.2;
 
 export default function DeviceDetail({ deviceId }: { deviceId: string }) {
   const { data: session } = useSession();
@@ -73,9 +132,13 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [isInviting, setIsInviting] = useState(false);
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [copiedSerial, setCopiedSerial] = useState(false);
 
-  async function loadDevice() {
-    setIsLoading(true);
+  // silent=true dipakai tombol Refresh di header: refetch tanpa nge-blank seluruh halaman
+  // ke tampilan "Memuat..." (yang cuma dipakai buat initial load).
+  async function loadDevice(options?: { silent?: boolean }) {
+    if (!options?.silent) setIsLoading(true);
     setError(null);
     try {
       const data = await api.get<Device>(`/devices/${deviceId}`);
@@ -83,7 +146,27 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Gagal memuat device.");
     } finally {
-      setIsLoading(false);
+      if (!options?.silent) setIsLoading(false);
+    }
+  }
+
+  async function handleRefresh() {
+    setIsRefreshing(true);
+    try {
+      await loadDevice({ silent: true });
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
+
+  async function handleCopySerial() {
+    if (!device) return;
+    try {
+      await navigator.clipboard.writeText(device.serialNumber);
+      setCopiedSerial(true);
+      setTimeout(() => setCopiedSerial(false), 1500);
+    } catch {
+      // Clipboard API bisa diblok (mis. non-secure context) — best-effort, diamkan aja.
     }
   }
 
@@ -114,6 +197,14 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
   const isLive = effectiveLastUpdateAt != null && now - effectiveLastUpdateAt.getTime() < LIVE_THRESHOLD_MS;
 
   const isOwner = device?.ownerId === session?.user?.id;
+
+  // "nS" = jumlah cell seri di pack #1 (device ini bisa multi-pack, tapi tiap pack independen,
+  // bukan disusun seri satu sama lain — jadi konfigurasi seri yang relevan itu per-pack).
+  const firstPackCellCount = device?.packs[0]?.cells.length ?? 0;
+  const hasHeterogeneousPacks =
+    (device?.packs.length ?? 0) > 1 &&
+    device!.packs.some((p) => p.cells.length !== firstPackCellCount);
+  const nominalVoltage = firstPackCellCount > 0 ? firstPackCellCount * NOMINAL_LIFEPO4_V_PER_CELL : null;
 
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
@@ -198,46 +289,114 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
     <div className="space-y-6">
       {/* Header */}
       <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] lg:p-6">
-        <div className="flex items-start justify-between flex-wrap gap-3">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-800 dark:text-white/90">
-              {device.name || device.serialNumber}
-            </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">
-              {device.serialNumber}
-            </p>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Owner:{" "}
-              {device.owner
-                ? device.owner.name || device.owner.email
-                : "— (belum diklaim)"}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {effectiveLastUpdateAt && (
-              <Badge
-                color={isLive ? "success" : "error"}
-                startIcon={
-                  <span className="relative flex h-2 w-2">
-                    {isLive && (
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success-400 opacity-75" />
-                    )}
-                    <span
-                      className={`relative inline-flex h-2 w-2 rounded-full ${
-                        isLive ? "bg-success-500" : "bg-error-500"
-                      }`}
-                    />
-                  </span>
-                }
+        <div className="flex items-start justify-between flex-wrap gap-4">
+          <div className="min-w-0">
+            {/* Identity */}
+            <div className="flex items-center flex-wrap gap-2">
+              <h3 className="text-lg font-semibold text-gray-800 dark:text-white/90">
+                {device.name || device.serialNumber}
+              </h3>
+              {device.verified ? (
+                <Badge color="success">Verified</Badge>
+              ) : (
+                <Badge color="warning">Pending Verifikasi</Badge>
+              )}
+            </div>
+            <div className="mt-1 flex items-center gap-1.5">
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">
+                ID: {truncateMiddle(device.serialNumber)}
+              </p>
+              <button
+                type="button"
+                onClick={handleCopySerial}
+                title="Salin Device ID"
+                className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
               >
-                {isLive ? "Live" : "Offline"} · {effectiveLastUpdateAt.toLocaleTimeString("id-ID")}
-              </Badge>
-            )}
-            {device.verified ? (
-              <Badge color="success">Verified</Badge>
-            ) : (
-              <Badge color="warning">Pending Verifikasi</Badge>
-            )}
+                {copiedSerial ? (
+                  <CheckLineIcon className="w-3.5 h-3.5 text-success-500" />
+                ) : (
+                  <CopyIcon className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </div>
+
+            {/* Owner */}
+            <div className="mt-3 flex items-center gap-2">
+              <AvatarText
+                name={device.owner ? device.owner.name || device.owner.email : "?"}
+                className="shrink-0"
+              />
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                {device.owner
+                  ? device.owner.name || device.owner.email
+                  : "— (belum diklaim)"}
+              </span>
+              <Badge color="light" size="sm">Owner</Badge>
+            </div>
+
+            {/* Status pills */}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {effectiveLastUpdateAt && (
+                <Badge
+                  color={isLive ? "success" : "error"}
+                  startIcon={
+                    <span className="relative flex h-2 w-2">
+                      {isLive && (
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success-400 opacity-75" />
+                      )}
+                      <span
+                        className={`relative inline-flex h-2 w-2 rounded-full ${
+                          isLive ? "bg-success-500" : "bg-error-500"
+                        }`}
+                      />
+                    </span>
+                  }
+                >
+                  {isLive ? "Live" : "Offline"} · Last seen{" "}
+                  {formatLastSeen(now - effectiveLastUpdateAt.getTime())}
+                </Badge>
+              )}
+              {firstPackCellCount > 0 && (
+                <Badge color="info">
+                  LiFePO4 · {firstPackCellCount}S
+                  {hasHeterogeneousPacks ? " (Pack #1)" : ""}
+                </Badge>
+              )}
+              {nominalVoltage != null && (
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  ~{nominalVoltage.toFixed(1)}V nominal
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              title="Refresh data device"
+              className="flex items-center justify-center w-10 h-10 text-gray-500 rounded-lg hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 disabled:opacity-50"
+            >
+              <RefreshIcon className={`w-5 h-5 ${isRefreshing ? "animate-spin" : ""}`} />
+            </button>
+            <button
+              type="button"
+              onClick={openModal}
+              title="Undang kolaborator"
+              className="flex items-center justify-center w-10 h-10 text-gray-500 rounded-lg hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+            >
+              <ShareIcon className="w-5 h-5" />
+            </button>
+            <button
+              type="button"
+              disabled
+              title="Settings — Coming soon"
+              className="flex items-center justify-center w-10 h-10 text-gray-400 rounded-lg cursor-not-allowed opacity-50 dark:text-gray-600"
+            >
+              <SettingsIcon className="w-5 h-5" />
+            </button>
           </div>
         </div>
       </div>

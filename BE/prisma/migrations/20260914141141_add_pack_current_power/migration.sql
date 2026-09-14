@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Pack" ADD COLUMN     "current" DOUBLE PRECISION,
+ADD COLUMN     "power" DOUBLE PRECISION;

@@ -75,6 +75,9 @@ model Pack {
   device            Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   temperature       Float?
   balancerConnected Boolean  @default(false)
+  // Nullable: device lama belum kirim field ini di payload MQTT.
+  current           Float? // Ampere, dari sensor ACS712-05B — negatif = charging, positif = discharging
+  power             Float? // Watt, = voltage_pack x current
   cells             Cell[]
   updatedAt         DateTime @updatedAt
 

@@ -76,10 +76,14 @@ async function persistPayload(mqttDeviceId: string, payload: BmsDevicePayload) {
           index: pack.index,
           temperature: pack.temperature,
           balancerConnected: pack.balancerConnected,
+          current: pack.current ?? null,
+          power: pack.power ?? null,
         },
         update: {
           temperature: pack.temperature,
           balancerConnected: pack.balancerConnected,
+          current: pack.current ?? null,
+          power: pack.power ?? null,
         },
       });
 
