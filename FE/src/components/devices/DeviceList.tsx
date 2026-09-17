@@ -38,7 +38,9 @@ export default function DeviceList() {
   }
 
   useEffect(() => {
-    loadDevices();
+    queueMicrotask(() => {
+      loadDevices();
+    });
   }, []);
 
   async function handleAddDevice(e: React.FormEvent) {

@@ -77,7 +77,7 @@ const baseChartOptions: ApexOptions = {
     position: "bottom", 
     horizontalAlign: "center",
     fontSize: "12px",
-    markers: { width: 10, height: 10, radius: 2 }
+    markers: { size: 5, shape: "square" }
   },
 };
 

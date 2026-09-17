@@ -157,7 +157,9 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
   }
 
   useEffect(() => {
-    loadDevice();
+    queueMicrotask(() => {
+      loadDevice();
+    });
   }, [deviceId]);
 
   useBmsSocket((update) => {
