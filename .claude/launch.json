@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "bms-fe-dev",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": ["-c", "PATH=/Users/mozessapari/.nvm/versions/node/v20.20.0/bin:$PATH exec node /Users/mozessapari/.nvm/versions/node/v20.20.0/lib/node_modules/npm/bin/npm-cli.js --prefix /Users/mozessapari/Documents/BMS-ADB/FE run dev"],
+      "port": 3000
+    }
+  ]
+}

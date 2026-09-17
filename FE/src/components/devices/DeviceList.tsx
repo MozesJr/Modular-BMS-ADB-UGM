@@ -10,6 +10,8 @@ import { Modal } from "@/components/ui/modal";
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import { alertSuccess, alertError } from "@/lib/alerts";
+import { GroupIcon, BoxIconLine } from "@/icons";
+import BatteryIcon from "@/components/devices/BatteryIcon";
 
 export default function DeviceList() {
   const [devices, setDevices] = useState<Device[]>([]);
@@ -109,31 +111,53 @@ export default function DeviceList() {
       )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {devices.map((device) => (
-          <Link
-            key={device.id}
-            href={`/devices/${device.id}`}
-            className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 hover:border-brand-500 dark:hover:border-brand-500 transition-colors"
-          >
-            <div className="flex items-start justify-between mb-2">
-              <h4 className="font-medium text-gray-800 dark:text-white/90">
-                {device.name || device.serialNumber}
-              </h4>
-              {device.verified ? (
-                <Badge color="success">Verified</Badge>
-              ) : (
-                <Badge color="warning">Pending</Badge>
-              )}
-            </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 font-mono mb-3">
-              {device.serialNumber}
-            </p>
-            <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-              <span>{device.packs.length} pack</span>
-              <span>{device.collaborators.length} kolaborator</span>
-            </div>
-          </Link>
-        ))}
+        {devices.map((device) => {
+          const status = device.verified ? "verified" : "pending";
+          return (
+            <Link
+              key={device.id}
+              href={`/devices/${device.id}`}
+              className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 transition-all duration-200 hover:border-brand-500 hover:shadow-theme-md dark:hover:border-brand-500"
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gray-100 dark:bg-gray-800">
+                    <BatteryIcon status={status} size={24} />
+                  </div>
+                  <div className="min-w-0">
+                    <h4 className="font-medium text-gray-800 dark:text-white/90 truncate">
+                      {device.name || device.serialNumber}
+                    </h4>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">
+                      {device.serialNumber}
+                    </p>
+                  </div>
+                </div>
+                {device.verified ? (
+                  <Badge color="success">Verified</Badge>
+                ) : (
+                  <Badge color="warning">Pending</Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                <span
+                  className="flex items-center gap-1.5"
+                  aria-label={`${device.packs.length} pack`}
+                >
+                  <BoxIconLine className="size-4" />
+                  {device.packs.length} pack
+                </span>
+                <span
+                  className="flex items-center gap-1.5"
+                  aria-label={`${device.collaborators.length} kolaborator`}
+                >
+                  <GroupIcon className="size-4" />
+                  {device.collaborators.length} kolaborator
+                </span>
+              </div>
+            </Link>
+          );
+        })}
       </div>
 
       <Modal isOpen={isOpen} onClose={closeModal} className="max-w-[500px] m-4">
