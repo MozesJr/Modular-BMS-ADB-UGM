@@ -1,14 +1,11 @@
-// FE/src/components/devices/Gauge.tsx
 "use client";
 import { useAnimatedNumber } from "@/hooks/useAnimatedNumber";
 
 export type GaugeZone = { from: number; to: number; color: string };
 
-// Sudut diukur searah jarum jam dari jam 12 (0°). Sweep 270° ala dial automotive: dari
-// 225° (kiri-bawah) muter lewat atas sampai 495°=135° (kanan-bawah), nyisain celah di bawah.
 const SWEEP_START = 225;
 const SWEEP_END = 495;
-const STROKE_WIDTH = 8;
+const STROKE_WIDTH = 7;
 const CENTER = 50;
 const RADIUS = 40;
 
@@ -62,39 +59,39 @@ export default function Gauge({
               d={arcPath(RADIUS, valueToAngle(zone.from, min, max), valueToAngle(zone.to, min, max))}
               stroke={zone.color}
               strokeWidth={STROKE_WIDTH}
-              strokeLinecap="butt"
+              strokeLinecap="round"
               fill="none"
+              className="opacity-90"
             />
           ))}
           {needleValue != null && (
             <g
-              className="text-gray-700 dark:text-gray-300"
+              className="text-gray-800 dark:text-gray-200 transition-transform duration-300"
               transform={`rotate(${valueToAngle(needleValue, min, max)} ${CENTER} ${CENTER})`}
             >
               <line
                 x1={CENTER}
                 y1={CENTER}
                 x2={CENTER}
-                y2={CENTER - (RADIUS - 22)}
+                y2={CENTER - (RADIUS - 18)}
                 stroke="currentColor"
                 strokeWidth={2}
                 strokeLinecap="round"
               />
-              <circle cx={CENTER} cy={CENTER} r={3} fill="currentColor" />
+              <circle cx={CENTER} cy={CENTER} r={2.5} fill="currentColor" />
             </g>
           )}
         </svg>
-        {/* Diturunkan ke celah bawah dial (di luar sapuan jarum) biar nggak ketiban jarum */}
         <div
-          className="absolute left-1/2 flex justify-center"
-          style={{ top: "64%", transform: "translate(-50%, -50%)" }}
+          className="absolute left-1/2 flex justify-center pointer-events-none"
+          style={{ top: "65%", transform: "translate(-50%, -50%)" }}
         >
-          <span className="text-[11px] font-semibold text-gray-800 dark:text-white/90 whitespace-nowrap">
+          <span className="text-[11px] font-bold text-gray-900 dark:text-white whitespace-nowrap tracking-tight">
             {animatedValue != null ? `${animatedValue.toFixed(decimals)}${unit}` : "—"}
           </span>
         </div>
       </div>
-      <span className="mt-2 text-[10px] text-gray-500 dark:text-gray-400 text-center">
+      <span className="mt-1 text-[10px] font-medium text-gray-500 dark:text-gray-400 text-center tracking-tight">
         {label}
       </span>
     </div>

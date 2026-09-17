@@ -1,4 +1,3 @@
-// FE/src/components/devices/DeviceDetail.tsx
 "use client";
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
@@ -18,12 +17,8 @@ import PackCard from "@/components/devices/PackCard";
 import AvatarText from "@/components/ui/avatar/AvatarText";
 import { CopyIcon, CheckLineIcon } from "@/icons";
 
-// Window kecil khusus buat sparkline per-cell — dipisah dari rentang chart utama
-// (yang dipilih user via tab di DeviceHistoryCharts) biar sparkline tetap "tren terkini".
 const SPARKLINE_WINDOW_HOURS = 6;
 
-// Ikon belum ada di src/icons — dibikin inline pakai primitif SVG (garis/lingkaran) biar
-// bentuknya presisi, ikut konvensi inline-SVG yang sudah dipakai AppHeader.tsx.
 function RefreshIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -73,8 +68,6 @@ function formatLastSeen(ms: number) {
   return `${hours}h ago`;
 }
 
-// Terapkan update MQTT real-time (via WS) ke state device yang sudah dimuat lewat REST.
-// Pack/cell di-upsert by index (bukan by db id, karena payload WS gak bawa db id).
 function applyRealtimeUpdate(prev: Device, update: BmsUpdatePayload): Device {
   const packsByIndex = new Map(prev.packs.map((p) => [p.index, p]));
 
@@ -111,10 +104,7 @@ function applyRealtimeUpdate(prev: Device, update: BmsUpdatePayload): Device {
   };
 }
 
-// 2x PUBLISH_INTERVAL publisher (60s) — toleran ke satu siklus publish yang telat/miss
-// tanpa langsung kelihatan "Offline" palsu.
 const LIVE_THRESHOLD_MS = 120_000;
-// Voltage nominal per cell LiFePO4 (BUKAN reading live — itu ada di gauge Voltage Pack section bawah).
 const NOMINAL_LIFEPO4_V_PER_CELL = 3.2;
 
 export default function DeviceDetail({ deviceId }: { deviceId: string }) {
@@ -135,8 +125,6 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [copiedSerial, setCopiedSerial] = useState(false);
 
-  // silent=true dipakai tombol Refresh di header: refetch tanpa nge-blank seluruh halaman
-  // ke tampilan "Memuat..." (yang cuma dipakai buat initial load).
   async function loadDevice(options?: { silent?: boolean }) {
     if (!options?.silent) setIsLoading(true);
     setError(null);
@@ -165,30 +153,24 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
       await navigator.clipboard.writeText(device.serialNumber);
       setCopiedSerial(true);
       setTimeout(() => setCopiedSerial(false), 1500);
-    } catch {
-      // Clipboard API bisa diblok (mis. non-secure context) — best-effort, diamkan aja.
-    }
+    } catch {}
   }
 
   useEffect(() => {
     loadDevice();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceId]);
 
   useBmsSocket((update) => {
-    if (update.id !== deviceId) return; // broadcast global, filter punya device ini aja
+    if (update.id !== deviceId) return;
     setDevice((prev) => (prev ? applyRealtimeUpdate(prev, update) : prev));
     setLastUpdateAt(new Date());
   });
 
-  // Status live/offline dihitung dari selisih waktu, jadi perlu re-render berkala
-  // walau tidak ada pesan WS baru (mis. saat koneksi putus).
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // Sebelum ada pesan WS pertama, pakai updatedAt pack dari REST (data DB asli) sebagai baseline.
   const initialLastUpdateAt =
     device && device.packs.length > 0
       ? new Date(Math.max(...device.packs.map((p) => new Date(p.updatedAt).getTime())))
@@ -197,9 +179,6 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
   const isLive = effectiveLastUpdateAt != null && now - effectiveLastUpdateAt.getTime() < LIVE_THRESHOLD_MS;
 
   const isOwner = device?.ownerId === session?.user?.id;
-
-  // "nS" = jumlah cell seri di pack #1 (device ini bisa multi-pack, tapi tiap pack independen,
-  // bukan disusun seri satu sama lain — jadi konfigurasi seri yang relevan itu per-pack).
   const firstPackCellCount = device?.packs[0]?.cells.length ?? 0;
   const hasHeterogeneousPacks =
     (device?.packs.length ?? 0) > 1 &&
@@ -209,12 +188,10 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
     setInviteError(null);
-
     if (!inviteEmail.trim()) {
       setInviteError("Email wajib diisi.");
       return;
     }
-
     setIsInviting(true);
     try {
       await api.post(`/devices/${deviceId}/collaborators`, {
@@ -225,17 +202,11 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
       setInviteRole("viewer");
       closeModal();
       await loadDevice();
-      alertSuccess(
-        "Kolaborator ditambahkan",
-        `${inviteEmail.trim()} kini punya akses ke device ini.`,
-      );
+      alertSuccess("Kolaborator ditambahkan", `${inviteEmail.trim()} kini punya akses.`);
     } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.message
-          : "Gagal menambahkan kolaborator.";
+      const message = err instanceof ApiError ? err.message : "Gagal menambahkan kolaborator.";
       setInviteError(message);
-      alertError("Gagal menambahkan kolaborator", message);
+      alertError("Gagal", message);
     } finally {
       setIsInviting(false);
     }
@@ -254,32 +225,22 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
     try {
       await api.delete(`/devices/${deviceId}/collaborators?userId=${userId}`);
       await loadDevice();
-      alertSuccess(
-        "Kolaborator dihapus",
-        `"${userLabel}" telah dihapus dari device ini.`,
-      );
+      alertSuccess("Kolaborator dihapus", `"${userLabel}" telah dihapus.`);
     } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "Gagal menghapus kolaborator.",
-      );
-      alertError(
-        "Gagal menghapus kolaborator",
-        err instanceof ApiError ? err.message : undefined,
-      );
+      setError(err instanceof ApiError ? err.message : "Gagal menghapus.");
+      alertError("Gagal", err instanceof ApiError ? err.message : undefined);
     } finally {
       setRemovingUserId(null);
     }
   }
 
   if (isLoading) {
-    return (
-      <p className="text-sm text-gray-500 dark:text-gray-400">Memuat...</p>
-    );
+    return <div className="p-8 text-center text-sm text-gray-500">Memuat telemetri device...</div>;
   }
 
   if (error || !device) {
     return (
-      <div className="rounded-lg bg-error-50 px-4 py-3 text-sm text-error-600 dark:bg-error-500/10 dark:text-error-400">
+      <div className="rounded-xl bg-red-50 p-4 text-sm text-red-600 dark:bg-red-500/10 dark:text-red-400">
         {error ?? "Device tidak ditemukan."}
       </div>
     );
@@ -287,202 +248,156 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] lg:p-6">
+      {/* Header Utama BMS */}
+      <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] lg:p-6 shadow-sm">
         <div className="flex items-start justify-between flex-wrap gap-4">
           <div className="min-w-0">
-            {/* Identity */}
-            <div className="flex items-center flex-wrap gap-2">
-              <h3 className="text-lg font-semibold text-gray-800 dark:text-white/90">
+            <div className="flex items-center flex-wrap gap-2.5">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
                 {device.name || device.serialNumber}
               </h3>
               {device.verified ? (
-                <Badge color="success">Verified</Badge>
+                <Badge color="success">Verified System</Badge>
               ) : (
-                <Badge color="warning">Pending Verifikasi</Badge>
+                <Badge color="warning">Pending Verification</Badge>
               )}
             </div>
-            <div className="mt-1 flex items-center gap-1.5">
-              <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">
-                ID: {truncateMiddle(device.serialNumber)}
-              </p>
+
+            <div className="mt-1.5 flex items-center gap-2">
+              <span className="text-xs text-gray-500 dark:text-gray-400 font-mono bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded">
+                ID: {device.serialNumber}
+              </span>
               <button
                 type="button"
                 onClick={handleCopySerial}
-                title="Salin Device ID"
-                className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                title="Salin Serial Number"
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
               >
-                {copiedSerial ? (
-                  <CheckLineIcon className="w-3.5 h-3.5 text-success-500" />
-                ) : (
-                  <CopyIcon className="w-3.5 h-3.5" />
-                )}
+                {copiedSerial ? <CheckLineIcon className="w-4 h-4 text-emerald-500" /> : <CopyIcon className="w-4 h-4" />}
               </button>
             </div>
 
-            {/* Owner */}
-            <div className="mt-3 flex items-center gap-2">
-              <AvatarText
-                name={device.owner ? device.owner.name || device.owner.email : "?"}
-                className="shrink-0"
-              />
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                {device.owner
-                  ? device.owner.name || device.owner.email
-                  : "— (belum diklaim)"}
-              </span>
-              <Badge color="light" size="sm">Owner</Badge>
+            <div className="mt-4 flex items-center gap-3">
+              <AvatarText name={device.owner ? device.owner.name || device.owner.email : "?"} className="shrink-0" />
+              <div>
+                <span className="text-xs text-gray-400 block">Device Owner</span>
+                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                  {device.owner ? device.owner.name || device.owner.email : "— (Belum diklaim)"}
+                </span>
+              </div>
             </div>
 
-            {/* Status pills */}
-            <div className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="mt-4 flex flex-wrap items-center gap-2">
               {effectiveLastUpdateAt && (
                 <Badge
                   color={isLive ? "success" : "error"}
                   startIcon={
                     <span className="relative flex h-2 w-2">
-                      {isLive && (
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success-400 opacity-75" />
-                      )}
-                      <span
-                        className={`relative inline-flex h-2 w-2 rounded-full ${
-                          isLive ? "bg-success-500" : "bg-error-500"
-                        }`}
-                      />
+                      {isLive && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />}
+                      <span className={`relative inline-flex h-2 w-2 rounded-full ${isLive ? "bg-emerald-500" : "bg-red-500"}`} />
                     </span>
                   }
                 >
-                  {isLive ? "Live" : "Offline"} · Last seen{" "}
-                  {formatLastSeen(now - effectiveLastUpdateAt.getTime())}
+                  {isLive ? "Live Stream" : "Offline"} · Active {formatLastSeen(now - effectiveLastUpdateAt.getTime())}
                 </Badge>
               )}
               {firstPackCellCount > 0 && (
                 <Badge color="info">
-                  LiFePO4 · {firstPackCellCount}S
-                  {hasHeterogeneousPacks ? " (Pack #1)" : ""}
+                  LiFePO4 · {firstPackCellCount}S{hasHeterogeneousPacks ? " (Pack #1)" : ""}
                 </Badge>
               )}
               {nominalVoltage != null && (
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  ~{nominalVoltage.toFixed(1)}V nominal
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                  Nominal: ~{nominalVoltage.toFixed(1)}V
                 </span>
               )}
             </div>
           </div>
 
-          {/* Action buttons */}
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={handleRefresh}
               disabled={isRefreshing}
-              title="Refresh data device"
-              className="flex items-center justify-center w-10 h-10 text-gray-500 rounded-lg hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 disabled:opacity-50"
+              title="Refresh telemetry"
+              className="flex items-center justify-center w-10 h-10 text-gray-600 rounded-xl border border-gray-200 bg-gray-50 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 transition-all"
             >
-              <RefreshIcon className={`w-5 h-5 ${isRefreshing ? "animate-spin" : ""}`} />
+              <RefreshIcon className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`} />
             </button>
             <button
               type="button"
               onClick={openModal}
               title="Undang kolaborator"
-              className="flex items-center justify-center w-10 h-10 text-gray-500 rounded-lg hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+              className="flex items-center justify-center w-10 h-10 text-gray-600 rounded-xl border border-gray-200 bg-gray-50 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 transition-all"
             >
-              <ShareIcon className="w-5 h-5" />
-            </button>
-            <button
-              type="button"
-              disabled
-              title="Settings — Coming soon"
-              className="flex items-center justify-center w-10 h-10 text-gray-400 rounded-lg cursor-not-allowed opacity-50 dark:text-gray-600"
-            >
-              <SettingsIcon className="w-5 h-5" />
+              <ShareIcon className="w-4 h-4" />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Packs & Cells */}
-      <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] lg:p-6">
-        <h4 className="mb-4 font-medium text-gray-800 dark:text-white/90">
-          Pack &amp; Cell ({device.packs.length} pack)
-        </h4>
+      {/* Bagian Pack & Cell Cards */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between px-1">
+          <h4 className="font-bold text-gray-800 dark:text-white/90 text-base">
+            Battery Packs Overview ({device.packs.length} Pack Active)
+          </h4>
+        </div>
 
         {device.packs.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Belum ada data pack. Data akan muncul otomatis setelah device
-            mengirim data via MQTT.
-          </p>
+          <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 p-12 text-center bg-white dark:bg-white/[0.02]">
+            <p className="text-sm text-gray-500">Belum ada data pack telemetri yang masuk dari MQTT.</p>
+          </div>
         ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             {device.packs.map((pack) => (
-              <div
-                key={pack.index}
-                className={device.packs.length === 1 ? "xl:col-span-2" : undefined}
-              >
-                <PackCard
-                  pack={pack}
-                  history={sparklineHistory?.packs.find((p) => p.index === pack.index) ?? null}
-                />
+              <div key={pack.index} className={device.packs.length === 1 ? "xl:col-span-2" : undefined}>
+                <PackCard pack={pack} history={sparklineHistory?.packs.find((p) => p.index === pack.index) ?? null} />
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* History */}
+      {/* Grafik Riwayat Telemetri */}
       <DeviceHistoryCharts deviceId={deviceId} />
 
-      {/* Collaborators */}
-      <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] lg:p-6">
+      {/* Manajemen Kolaborator */}
+      <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] lg:p-6 shadow-sm">
         <div className="flex items-center justify-between mb-4">
-          <h4 className="font-medium text-gray-800 dark:text-white/90">
-            Kolaborator ({device.collaborators.length})
-          </h4>
+          <div>
+            <h4 className="font-bold text-gray-800 dark:text-white/90">Collaborators Access</h4>
+            <p className="text-xs text-gray-500">Akses kontrol pemantauan device bersama tim.</p>
+          </div>
           {isOwner && (
             <Button size="sm" onClick={openModal}>
-              + Undang
+              + Undang Anggota
             </Button>
           )}
         </div>
 
         {device.collaborators.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Belum ada kolaborator.{" "}
-            {isOwner && "Undang anggota tim untuk berbagi akses device ini."}
-          </p>
+          <p className="text-sm text-gray-500 py-4 text-center">Belum ada kolaborator terdaftar.</p>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {device.collaborators.map((collab) => (
-              <div
-                key={collab.id}
-                className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3"
-              >
-                <div>
-                  <p className="text-sm font-medium text-gray-800 dark:text-white/90">
-                    {collab.user.name || collab.user.email}
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {collab.user.email}
-                  </p>
+              <div key={collab.id} className="flex items-center justify-between rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/30 px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <AvatarText name={collab.user.name || collab.user.email} />
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{collab.user.name || collab.user.email}</p>
+                    <p className="text-xs text-gray-500">{collab.user.email}</p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <Badge color={collab.role === "editor" ? "info" : "light"}>
-                    {collab.role}
-                  </Badge>
+                  <Badge color={collab.role === "editor" ? "info" : "light"}>{collab.role}</Badge>
                   {isOwner && (
                     <button
-                      onClick={() =>
-                        handleRemoveCollaborator(
-                          collab.user.id,
-                          collab.user.name || collab.user.email,
-                        )
-                      }
+                      onClick={() => handleRemoveCollaborator(collab.user.id, collab.user.name || collab.user.email)}
                       disabled={removingUserId === collab.user.id}
-                      className="text-xs text-error-600 hover:text-error-700 dark:text-error-400"
+                      className="text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400"
                     >
-                      {removingUserId === collab.user.id
-                        ? "Menghapus..."
-                        : "Hapus"}
+                      {removingUserId === collab.user.id ? "Menghapus..." : "Hapus"}
                     </button>
                   )}
                 </div>
@@ -492,58 +407,32 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
         )}
       </div>
 
-      {/* Modal undang kolaborator */}
+      {/* Modal Kolaborator */}
       <Modal isOpen={isOpen} onClose={closeModal} className="max-w-[500px] m-4">
         <div className="p-6">
-          <h4 className="mb-1 text-xl font-semibold text-gray-800 dark:text-white/90">
-            Undang Kolaborator
-          </h4>
-          <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
-            Masukkan email user yang sudah terdaftar di sistem.
-          </p>
+          <h4 className="mb-1 text-xl font-semibold text-gray-800 dark:text-white/90">Undang Kolaborator</h4>
+          <p className="mb-6 text-sm text-gray-500">Berikan akses monitoring device ke email rekan tim Anda.</p>
 
-          <form onSubmit={handleInvite} className="space-y-5">
-            {inviteError && (
-              <div className="rounded-lg bg-error-50 px-4 py-3 text-sm text-error-600 dark:bg-error-500/10 dark:text-error-400">
-                {inviteError}
-              </div>
-            )}
+          <form onSubmit={handleInvite} className="space-y-4">
+            {inviteError && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">{inviteError}</div>}
             <div>
-              <Label>
-                Email <span className="text-error-500">*</span>
-              </Label>
-              <Input
-                type="email"
-                placeholder="user@example.com"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-              />
+              <Label>Email Akun <span className="text-red-500">*</span></Label>
+              <Input type="email" placeholder="user@example.com" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
             </div>
             <div>
-              <Label>Role</Label>
+              <Label>Hak Akses (Role)</Label>
               <select
                 value={inviteRole}
-                onChange={(e) =>
-                  setInviteRole(e.target.value as "viewer" | "editor")
-                }
-                className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 dark:border-gray-700 dark:text-white/90"
+                onChange={(e) => setInviteRole(e.target.value as "viewer" | "editor")}
+                className="h-11 w-full rounded-xl border border-gray-300 bg-transparent px-4 text-sm text-gray-800 dark:border-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
               >
-                <option value="viewer">Viewer (lihat data saja)</option>
-                <option value="editor">Editor (bisa kelola device)</option>
+                <option value="viewer" className="dark:bg-gray-900">Viewer (Hanya lihat data)</option>
+                <option value="editor" className="dark:bg-gray-900">Editor (Kelola parameter device)</option>
               </select>
             </div>
-            <div className="flex items-center gap-3 justify-end">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={closeModal}
-                type="button"
-              >
-                Batal
-              </Button>
-              <Button size="sm" disabled={isInviting}>
-                {isInviting ? "Mengundang..." : "Undang"}
-              </Button>
+            <div className="flex items-center gap-3 justify-end pt-2">
+              <Button size="sm" variant="outline" onClick={closeModal} type="button">Batal</Button>
+              <Button size="sm" disabled={isInviting}>{isInviting ? "Mengirim..." : "Kirim Undangan"}</Button>
             </div>
           </form>
         </div>

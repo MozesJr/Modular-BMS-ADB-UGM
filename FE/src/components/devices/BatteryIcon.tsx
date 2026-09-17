@@ -2,25 +2,18 @@ import React from "react";
 
 export type DeviceVerificationStatus = "verified" | "pending";
 
-// Device.verified di schema cuma Boolean (lihat BE/prisma/schema.prisma), jadi
-// cuma ada 2 state. Level di sini bersifat indikator status verifikasi, BUKAN
-// SoC/persentase baterai real (Device belum punya field itu). Kalau nanti ada
-// field SoC asli dari pack/cell, ganti sumber `level` di pemanggil, map ini
-// tetap jadi fallback saat SoC belum tersedia.
 export const STATUS_LEVEL_MAP: Record<DeviceVerificationStatus, number> = {
   verified: 100,
   pending: 35,
 };
 
-export const STATUS_FILL_COLOR_MAP: Record<DeviceVerificationStatus, string> =
-  {
-    verified: "text-success-500 dark:text-success-500",
-    pending: "text-warning-500 dark:text-orange-400",
-  };
+export const STATUS_FILL_COLOR_MAP: Record<DeviceVerificationStatus, string> = {
+  verified: "text-emerald-500 dark:text-emerald-400",
+  pending: "text-amber-500 dark:text-amber-400",
+};
 
 interface BatteryIconProps {
   status: DeviceVerificationStatus;
-  /** Override manual persentase isi (0-100). Default ambil dari STATUS_LEVEL_MAP. */
   level?: number;
   size?: number;
   className?: string;
@@ -39,7 +32,6 @@ export default function BatteryIcon({
   className = "",
 }: BatteryIconProps) {
   const resolvedLevel = Math.max(0, Math.min(100, level ?? STATUS_LEVEL_MAP[status]));
-
   const fillMaxWidth = BODY_WIDTH - BODY_PADDING * 2;
   const fillWidth = (fillMaxWidth * resolvedLevel) / 100;
 
@@ -53,7 +45,6 @@ export default function BatteryIcon({
       className={className}
       aria-hidden="true"
     >
-      {/* Battery outline + terminal nub */}
       <rect
         x={BODY_X}
         y={BODY_Y}
@@ -62,7 +53,7 @@ export default function BatteryIcon({
         rx={2.5}
         stroke="currentColor"
         strokeWidth={1.5}
-        className="text-gray-300 dark:text-gray-600"
+        className="text-gray-300 dark:text-gray-700"
       />
       <rect
         x={BODY_X + BODY_WIDTH + 1}
@@ -71,10 +62,8 @@ export default function BatteryIcon({
         height={4}
         rx={1}
         fill="currentColor"
-        className="text-gray-300 dark:text-gray-600"
+        className="text-gray-300 dark:text-gray-700"
       />
-
-      {/* Fill bar berdasarkan status verifikasi */}
       {resolvedLevel > 0 && (
         <rect
           x={BODY_X + BODY_PADDING}

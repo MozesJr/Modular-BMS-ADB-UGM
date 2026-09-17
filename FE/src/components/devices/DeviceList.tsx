@@ -31,9 +31,7 @@ export default function DeviceList() {
       const data = await api.get<Device[]>("/devices");
       setDevices(data);
     } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "Gagal memuat data device.",
-      );
+      setError(err instanceof ApiError ? err.message : "Gagal memuat data device.");
     } finally {
       setIsLoading(false);
     }
@@ -48,7 +46,7 @@ export default function DeviceList() {
     setFormError(null);
 
     if (!newSerialNumber.trim()) {
-      setFormError("Device ID / lisensi wajib diisi.");
+      setFormError("Device ID / Serial Number wajib diisi.");
       return;
     }
 
@@ -62,51 +60,33 @@ export default function DeviceList() {
       setNewName("");
       closeModal();
       await loadDevices();
-      alertSuccess(
-        "Device ditambahkan",
-        `Device "${newSerialNumber.trim()}" menunggu verifikasi admin.`,
-      );
+      alertSuccess("Device ditambahkan", `Device "${newSerialNumber.trim()}" berhasil didaftarkan.`);
     } catch (err) {
-      const message =
-        err instanceof ApiError ? err.message : "Gagal menambahkan device.";
+      const message = err instanceof ApiError ? err.message : "Gagal menambahkan device.";
       setFormError(message);
-      alertError("Gagal menambahkan device", message);
+      alertError("Gagal", message);
     } finally {
       setIsSubmitting(false);
     }
   }
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] lg:p-6">
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] lg:p-6 shadow-sm">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h3 className="text-lg font-semibold text-gray-800 dark:text-white/90">
-            My Devices
-          </h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Device BMS yang kamu miliki atau kelola bersama tim.
-          </p>
+          <h3 className="text-xl font-bold text-gray-900 dark:text-white">My BMS Devices</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Kelola unit manajemen baterai yang terhubung dalam sistem.</p>
         </div>
-        <Button size="sm" onClick={openModal}>
-          + Tambah Device
-        </Button>
+        <Button size="sm" onClick={openModal}>+ Tambah Device</Button>
       </div>
 
-      {isLoading && (
-        <p className="text-sm text-gray-500 dark:text-gray-400">Memuat...</p>
-      )}
-      {error && (
-        <div className="rounded-lg bg-error-50 px-4 py-3 text-sm text-error-600 dark:bg-error-500/10 dark:text-error-400">
-          {error}
-        </div>
-      )}
+      {isLoading && <p className="text-sm text-gray-500 py-8 text-center">Memuat daftar device...</p>}
+      {error && <div className="rounded-xl bg-red-50 p-4 text-sm text-red-600 mb-4">{error}</div>}
 
       {!isLoading && !error && devices.length === 0 && (
-        <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-700 px-4 py-10 text-center">
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Belum ada device terdaftar. Klik &quot;Tambah Device&quot; untuk
-            mulai.
-          </p>
+        <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 px-6 py-12 text-center bg-gray-50/50 dark:bg-white/[0.02]">
+          <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Belum ada device BMS terdaftar.</p>
+          <p className="text-xs text-gray-400 mt-1">Klik tombol &quot;Tambah Device&quot; untuk menghubungkan unit.</p>
         </div>
       )}
 
@@ -117,42 +97,33 @@ export default function DeviceList() {
             <Link
               key={device.id}
               href={`/devices/${device.id}`}
-              className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 transition-all duration-200 hover:border-brand-500 hover:shadow-theme-md dark:hover:border-brand-500"
+              className="rounded-2xl border border-gray-200 dark:border-gray-800 p-5 bg-white dark:bg-gray-900/40 transition-all duration-200 hover:border-brand-500 hover:shadow-md group"
             >
-              <div className="flex items-start justify-between mb-3">
+              <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gray-100 dark:bg-gray-800">
-                    <BatteryIcon status={status} size={24} />
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gray-100 dark:bg-gray-800 group-hover:bg-brand-50 dark:group-hover:bg-brand-500/10 transition-colors">
+                    <BatteryIcon status={status} size={26} />
                   </div>
                   <div className="min-w-0">
-                    <h4 className="font-medium text-gray-800 dark:text-white/90 truncate">
+                    <h4 className="font-bold text-gray-900 dark:text-white/90 truncate text-base">
                       {device.name || device.serialNumber}
                     </h4>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">
+                    <p className="text-xs text-gray-500 font-mono truncate mt-0.5">
                       {device.serialNumber}
                     </p>
                   </div>
                 </div>
-                {device.verified ? (
-                  <Badge color="success">Verified</Badge>
-                ) : (
-                  <Badge color="warning">Pending</Badge>
-                )}
+                {device.verified ? <Badge color="success">Verified</Badge> : <Badge color="warning">Pending</Badge>}
               </div>
-              <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-                <span
-                  className="flex items-center gap-1.5"
-                  aria-label={`${device.packs.length} pack`}
-                >
-                  <BoxIconLine className="size-4" />
-                  {device.packs.length} pack
+
+              <div className="flex items-center gap-4 text-xs font-medium text-gray-500 pt-3 border-t border-gray-100 dark:border-gray-800">
+                <span className="flex items-center gap-1.5">
+                  <BoxIconLine className="size-4 text-gray-400" />
+                  {device.packs.length} Pack
                 </span>
-                <span
-                  className="flex items-center gap-1.5"
-                  aria-label={`${device.collaborators.length} kolaborator`}
-                >
-                  <GroupIcon className="size-4" />
-                  {device.collaborators.length} kolaborator
+                <span className="flex items-center gap-1.5">
+                  <GroupIcon className="size-4 text-gray-400" />
+                  {device.collaborators.length} Kolaborator
                 </span>
               </div>
             </Link>
@@ -162,53 +133,22 @@ export default function DeviceList() {
 
       <Modal isOpen={isOpen} onClose={closeModal} className="max-w-[500px] m-4">
         <div className="p-6">
-          <h4 className="mb-1 text-xl font-semibold text-gray-800 dark:text-white/90">
-            Tambah Device Baru
-          </h4>
-          <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
-            Masukkan Device ID sesuai yang tertera pada unit BMS fisik. Device
-            akan berstatus <span className="font-medium">Pending</span> sampai
-            diverifikasi admin.
-          </p>
+          <h4 className="mb-1 text-xl font-semibold text-gray-800 dark:text-white/90">Registrasi Device Baru</h4>
+          <p className="mb-6 text-sm text-gray-500">Masukkan Serial Number sesuai fisik modul BMS.</p>
 
-          <form onSubmit={handleAddDevice} className="space-y-5">
-            {formError && (
-              <div className="rounded-lg bg-error-50 px-4 py-3 text-sm text-error-600 dark:bg-error-500/10 dark:text-error-400">
-                {formError}
-              </div>
-            )}
+          <form onSubmit={handleAddDevice} className="space-y-4">
+            {formError && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">{formError}</div>}
             <div>
-              <Label>
-                Device ID / Lisensi <span className="text-error-500">*</span>
-              </Label>
-              <Input
-                type="text"
-                placeholder="mis. esp32-bms-001"
-                value={newSerialNumber}
-                onChange={(e) => setNewSerialNumber(e.target.value)}
-              />
+              <Label>Device Serial Number <span className="text-red-500">*</span></Label>
+              <Input type="text" placeholder="mis. GAMA-BMS-002" value={newSerialNumber} onChange={(e) => setNewSerialNumber(e.target.value)} />
             </div>
             <div>
-              <Label>Nama Device (opsional)</Label>
-              <Input
-                type="text"
-                placeholder="mis. BMS Rumah - Lantai 1"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-              />
+              <Label>Nama Label (Opsional)</Label>
+              <Input type="text" placeholder="mis. Powerbank Server Utama" value={newName} onChange={(e) => setNewName(e.target.value)} />
             </div>
-            <div className="flex items-center gap-3 justify-end">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={closeModal}
-                type="button"
-              >
-                Batal
-              </Button>
-              <Button type="submit" size="sm" disabled={isSubmitting}>
-                {isSubmitting ? "Menambahkan..." : "Tambah Device"}
-              </Button>
+            <div className="flex items-center gap-3 justify-end pt-2">
+              <Button size="sm" variant="outline" onClick={closeModal} type="button">Batal</Button>
+              <Button type="submit" size="sm" disabled={isSubmitting}>{isSubmitting ? "Menambahkan..." : "Daftarkan Device"}</Button>
             </div>
           </form>
         </div>

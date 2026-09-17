@@ -1,4 +1,3 @@
-// FE/src/components/devices/PackCard.tsx
 "use client";
 import dynamic from "next/dynamic";
 import type { ApexOptions } from "apexcharts";
@@ -12,11 +11,9 @@ import { ArrowUpIcon, ArrowDownIcon } from "@/icons";
 
 const ReactApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
 
-// Range nominal cell Li-ion, dipakai buat estimasi SOC dari voltage karena API belum punya field capacity/SOC asli.
 const NOMINAL_MIN_V = 3.0;
 const NOMINAL_MAX_V = 4.2;
 
-// Zona gauge voltage per-cell LiFePO4: merah di luar batas aman, kuning mendekati batas, hijau normal.
 const CELL_GAUGE_MIN = 2.0;
 const CELL_GAUGE_MAX = 4.0;
 const CELL_GAUGE_ZONES: GaugeZone[] = [
@@ -27,7 +24,6 @@ const CELL_GAUGE_ZONES: GaugeZone[] = [
   { from: 3.65, to: 4.0, color: GAUGE_COLOR_ERROR },
 ];
 
-// Threshold suhu ini estimasi umum untuk cell LiFePO4, sesuaikan kalau ada spesifikasi resmi dari datasheet BMS.
 const TEMP_GAUGE_MIN = 0;
 const TEMP_GAUGE_MAX = 50;
 const TEMP_GAUGE_ZONES: GaugeZone[] = [
@@ -38,7 +34,6 @@ const TEMP_GAUGE_ZONES: GaugeZone[] = [
   { from: 45, to: 50, color: GAUGE_COLOR_ERROR },
 ];
 
-// Imbalance: kebalikan dari gauge lain — makin kecil makin baik.
 const IMBALANCE_GAUGE_MIN = 0;
 const IMBALANCE_GAUGE_MAX = 100;
 const IMBALANCE_GAUGE_ZONES: GaugeZone[] = [
@@ -47,15 +42,12 @@ const IMBALANCE_GAUGE_ZONES: GaugeZone[] = [
   { from: 60, to: 100, color: GAUGE_COLOR_ERROR },
 ];
 
-// Arus & daya digauge berdasarkan MAGNITUDE (nilai absolut) — arah charging/discharging
-// ditampilkan terpisah lewat badge, bukan lewat gauge itu sendiri. Range sensor ACS712-05B: ±5A.
-const CURRENT_GAUGE_MAX_ABS = 5; // Ampere
+const CURRENT_GAUGE_MAX_ABS = 5;
 const CURRENT_GAUGE_ZONES: GaugeZone[] = [
   { from: 0, to: 3, color: GAUGE_COLOR_SUCCESS },
   { from: 3, to: 4.5, color: GAUGE_COLOR_WARNING },
   { from: 4.5, to: 5, color: GAUGE_COLOR_ERROR },
 ];
-// Voltage "wajar tertinggi" per cell dipakai konsisten dengan CELL_GAUGE_ZONES (batas aman LiFePO4 3.65V).
 const POWER_GAUGE_MAX_VOLTAGE_PER_CELL = 3.65;
 
 function clamp(value: number, min: number, max: number) {
@@ -82,11 +74,7 @@ export default function PackCard({
   let percent: number | null = null;
   if (cellCount > 0) {
     const range = (NOMINAL_MAX_V - NOMINAL_MIN_V) * cellCount;
-    percent = clamp(
-      ((packVoltage - NOMINAL_MIN_V * cellCount) / range) * 100,
-      0,
-      100,
-    );
+    percent = clamp(((packVoltage - NOMINAL_MIN_V * cellCount) / range) * 100, 0, 100);
   }
 
   let maxV: number | null = null;
@@ -103,8 +91,6 @@ export default function PackCard({
   const animatedPercent = useAnimatedNumber(percent);
   const animatedVoltage = useAnimatedNumber(packVoltage);
 
-  // Zona gauge voltage total pack dihitung dinamis dari jumlah cell aktual (bukan hardcode 6 cell) —
-  // setara per-cell: hijau 3.0-3.3V, kuning 2.75-3.0V & 3.3-3.45V, merah di luar itu.
   const packVoltageMin = 2.0 * cellCount;
   const packVoltageMax = 4.0 * cellCount;
   const packVoltageZones: GaugeZone[] = [
@@ -115,14 +101,11 @@ export default function PackCard({
     { from: 3.45 * cellCount, to: 4.0 * cellCount, color: GAUGE_COLOR_ERROR },
   ];
 
-  // current negatif = charging, positif = discharging (konvensi firmware).
   const isCharging = pack.current != null && pack.current < 0;
   const currentMagnitude = pack.current != null ? Math.abs(pack.current) : null;
   const powerMagnitude = pack.power != null ? Math.abs(pack.power) : null;
 
-  // Max daya dihitung dinamis dari jumlah cell aktual (bukan hardcode), zona proporsional ke zona arus.
-  const powerGaugeMaxAbs =
-    cellCount > 0 ? CURRENT_GAUGE_MAX_ABS * POWER_GAUGE_MAX_VOLTAGE_PER_CELL * cellCount : 1;
+  const powerGaugeMaxAbs = cellCount > 0 ? CURRENT_GAUGE_MAX_ABS * POWER_GAUGE_MAX_VOLTAGE_PER_CELL * cellCount : 1;
   const powerGaugeZones: GaugeZone[] = [
     { from: 0, to: powerGaugeMaxAbs * 0.6, color: GAUGE_COLOR_SUCCESS },
     { from: powerGaugeMaxAbs * 0.6, to: powerGaugeMaxAbs * 0.9, color: GAUGE_COLOR_WARNING },
@@ -133,193 +116,158 @@ export default function PackCard({
     percent == null
       ? { bar: "bg-gray-300 dark:bg-gray-600", badge: "light" as const }
       : percent >= 50
-        ? { bar: "bg-success-500", badge: "success" as const }
+        ? { bar: "bg-emerald-500", badge: "success" as const }
         : percent >= 20
-          ? { bar: "bg-warning-500", badge: "warning" as const }
-          : { bar: "bg-error-500", badge: "error" as const };
+          ? { bar: "bg-amber-500", badge: "warning" as const }
+          : { bar: "bg-red-500", badge: "error" as const };
 
   return (
-    <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4">
-      <div className="flex items-center justify-between mb-4">
-        <span className="font-medium text-gray-800 dark:text-white/90">
-          Pack #{pack.index}
-        </span>
-        <Badge color={pack.balancerConnected ? "success" : "error"}>
-          Balancer {pack.balancerConnected ? "OK" : "Off"}
-        </Badge>
-      </div>
-
-      {/* Battery capacity overview (estimasi dari voltage, API belum punya field SOC/capacity asli) */}
-      <div className="mb-4">
-        <div className="flex items-baseline justify-between mb-1.5">
-          <span className="text-2xl font-semibold text-gray-800 dark:text-white/90">
-            {animatedPercent != null ? `${animatedPercent.toFixed(0)}%` : "—"}
-          </span>
-          {percent != null && <Badge color={levelColor.badge}>Estimasi SOC</Badge>}
-        </div>
-        <div className="flex items-center gap-1">
-          <div className="relative h-6 flex-1 rounded-md border-2 border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-white/5 p-0.5">
-            <div
-              className={`h-full rounded-sm transition-all ${levelColor.bar}`}
-              style={{ width: `${animatedPercent ?? 0}%` }}
-            />
+    <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] p-5 shadow-sm space-y-5">
+      
+      {/* 1. HEADER KARTU PACK & STATUS SWITCH MINI ALA HOME ASSISTANT */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-gray-100 dark:border-gray-800">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-base font-bold text-gray-900 dark:text-white">
+              Pack #{pack.index}
+            </span>
+            <Badge color={isCharging ? "success" : "info"} size="sm">
+              {isCharging ? "⚡ CHARGING" : "🔋 STANDBY / DISCHG"}
+            </Badge>
           </div>
-          <div className="h-2.5 w-1 rounded-r-sm bg-gray-300 dark:bg-gray-700" />
+          <span className="text-xs text-gray-400">Live Telemetry Control Unit</span>
         </div>
-        <p className="mt-1.5 text-center text-[11px] text-gray-500 dark:text-gray-400">
-          {(animatedVoltage ?? 0).toFixed(2)} V total
-          {percent == null && " · belum ada data cell"}
-        </p>
-      </div>
 
-      {/* Quick stats — gauge radial */}
-      <div className="flex flex-wrap justify-center gap-3 mb-4">
-        <div className="w-[250px] rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-3 flex justify-center">
-          <Gauge
-            value={pack.temperature}
-            min={TEMP_GAUGE_MIN}
-            max={TEMP_GAUGE_MAX}
-            zones={TEMP_GAUGE_ZONES}
-            label="Suhu"
-            unit="°C"
-            decimals={1}
-            size={84}
-          />
-        </div>
-        <div className="w-[250px] rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-3 flex justify-center">
-          <Gauge
-            value={imbalanceMv}
-            min={IMBALANCE_GAUGE_MIN}
-            max={IMBALANCE_GAUGE_MAX}
-            zones={IMBALANCE_GAUGE_ZONES}
-            label="Imbalance"
-            unit="mV"
-            decimals={0}
-            size={84}
-          />
-        </div>
-        <div className="w-[250px] rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-3 flex justify-center">
-          <Gauge
-            value={cellCount > 0 ? packVoltage : null}
-            min={packVoltageMin}
-            max={cellCount > 0 ? packVoltageMax : 1}
-            zones={packVoltageZones}
-            label="Voltage Pack"
-            unit="V"
-            decimals={2}
-            size={84}
-          />
-        </div>
-        <div className="w-[250px] rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-3 flex flex-col items-center gap-2">
-          {pack.current != null && (
-            <Badge
-              color={isCharging ? "success" : "primary"}
-              size="sm"
-              startIcon={
-                isCharging ? (
-                  <ArrowUpIcon className="w-3 h-3" />
-                ) : (
-                  <ArrowDownIcon className="w-3 h-3" />
-                )
-              }
-            >
-              {isCharging ? "Charging" : "Discharging"}
-            </Badge>
-          )}
-          <Gauge
-            value={currentMagnitude}
-            min={0}
-            max={CURRENT_GAUGE_MAX_ABS}
-            zones={CURRENT_GAUGE_ZONES}
-            label="Arus"
-            unit="A"
-            decimals={2}
-            size={84}
-          />
-        </div>
-        <div className="w-[250px] rounded-lg bg-gray-50 dark:bg-white/5 px-3 py-3 flex flex-col items-center gap-2">
-          {pack.power != null && (
-            <Badge
-              color={isCharging ? "success" : "primary"}
-              size="sm"
-              startIcon={
-                isCharging ? (
-                  <ArrowUpIcon className="w-3 h-3" />
-                ) : (
-                  <ArrowDownIcon className="w-3 h-3" />
-                )
-              }
-            >
-              {isCharging ? "Charging" : "Discharging"}
-            </Badge>
-          )}
-          <Gauge
-            value={powerMagnitude}
-            min={0}
-            max={powerGaugeMaxAbs}
-            zones={powerGaugeZones}
-            label="Daya"
-            unit="W"
-            decimals={1}
-            size={84}
-          />
+        {/* Status Pills Mini ala Home Assistant */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-xs">
+            <span className={`w-2 h-2 rounded-full ${pack.balancerConnected ? "bg-emerald-500 animate-pulse" : "bg-red-500"}`} />
+            <span className="font-medium text-gray-700 dark:text-gray-300">
+              Balancer: {pack.balancerConnected ? "Active" : "Off"}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-xs">
+            <span className="text-gray-400">Cells:</span>
+            <span className="font-bold text-gray-800 dark:text-white">{cellCount}S</span>
+          </div>
         </div>
       </div>
 
-      {/* Cell voltage grid — dinamis di tengah & wrap ke bawah */}
-      {cellCount === 0 ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Belum ada data cell untuk pack ini.
-        </p>
-      ) : (
-        <div className="flex flex-wrap justify-center gap-2">
-          {pack.cells.map((cell, i) => {
-            const isMax = hasSpread && cell.voltage === maxV;
-            const isMin = hasSpread && cell.voltage === minV;
-            const ringClass = isMax
-              ? "ring-2 ring-warning-500"
-              : isMin
-                ? "ring-2 ring-blue-light-500"
-                : "";
-            const cellHistory = history?.cells.find((c) => c.index === cell.index);
-            const sparklineData = (cellHistory?.voltage ?? []).map((point) => ({
-              x: new Date(point.recordedAt).getTime(),
-              y: point.voltage,
-            }));
+      {/* 2. BARIS UTAMA: SOC PROGRESS & KEY METRICS GRID */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Kolom Kiri: Estimasi SOC Bar */}
+        <div className="lg:col-span-1 bg-gray-50/70 dark:bg-gray-900/40 p-4 rounded-xl border border-gray-100 dark:border-gray-800 flex flex-col justify-between">
+          <div>
+            <div className="flex items-baseline justify-between mb-1">
+              <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">ESTIMATED SOC</span>
+              {percent != null && <Badge color={levelColor.badge} size="sm">Live</Badge>}
+            </div>
+            <div className="text-3xl font-extrabold text-gray-900 dark:text-white">
+              {animatedPercent != null ? `${animatedPercent.toFixed(0)}%` : "—"}
+            </div>
+          </div>
 
-            return (
-              <div
-                key={cell.index}
-                className={`w-[92px] rounded-lg bg-gray-50 dark:bg-white/5 px-2 py-2 text-center ${ringClass}`}
-              >
-                <Gauge
-                  value={cell.voltage}
-                  min={CELL_GAUGE_MIN}
-                  max={CELL_GAUGE_MAX}
-                  zones={CELL_GAUGE_ZONES}
-                  label={`Cell ${cell.index}`}
-                  unit="V"
-                  decimals={2}
-                  size={64}
-                />
-                {sparklineData.length > 1 && (
-                  <div className="mt-1 h-8">
-                    <ReactApexChart
-                      options={{
-                        ...sparklineOptions,
-                        colors: [getSeriesColor(i)],
-                      }}
-                      series={[{ data: sparklineData }]}
-                      type="line"
-                      height={32}
-                    />
-                  </div>
-                )}
+          <div className="my-3">
+            <div className="flex items-center gap-1.5">
+              <div className="relative h-3.5 flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-gray-200 dark:bg-gray-700/50 p-0.5 overflow-hidden">
+                <div className={`h-full rounded transition-all duration-500 ${levelColor.bar}`} style={{ width: `${animatedPercent ?? 0}%` }} />
               </div>
-            );
-          })}
+              <div className="h-2 w-1 rounded-r bg-gray-300 dark:bg-gray-700" />
+            </div>
+          </div>
+
+          <div className="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 pt-2 border-t border-gray-200/50 dark:border-gray-800">
+            <span>Total Pack Voltage</span>
+            <span className="font-bold text-gray-800 dark:text-white">{(animatedVoltage ?? 0).toFixed(2)} V</span>
+          </div>
         </div>
-      )}
+
+        {/* Kolom Kanan: Radial Gauges Grid (Suhu, Delta, Arus, Daya, Pack Volts) */}
+        <div className="lg:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <div className="rounded-xl bg-gray-50/50 dark:bg-gray-900/30 border border-gray-100 dark:border-gray-800 p-2 flex justify-center items-center">
+            <Gauge value={pack.temperature} min={TEMP_GAUGE_MIN} max={TEMP_GAUGE_MAX} zones={TEMP_GAUGE_ZONES} label="Suhu" unit="°C" decimals={1} size={72} />
+          </div>
+          <div className="rounded-xl bg-gray-50/50 dark:bg-gray-900/30 border border-gray-100 dark:border-gray-800 p-2 flex justify-center items-center">
+            <Gauge value={imbalanceMv} min={IMBALANCE_GAUGE_MIN} max={IMBALANCE_GAUGE_MAX} zones={IMBALANCE_GAUGE_ZONES} label="Delta Cell" unit="mV" decimals={0} size={72} />
+          </div>
+          <div className="rounded-xl bg-gray-50/50 dark:bg-gray-900/30 border border-gray-100 dark:border-gray-800 p-2 flex justify-center items-center">
+            <Gauge value={currentMagnitude} min={0} max={CURRENT_GAUGE_MAX_ABS} zones={CURRENT_GAUGE_ZONES} label="Arus" unit="A" decimals={2} size={72} />
+          </div>
+          <div className="rounded-xl bg-gray-50/50 dark:bg-gray-900/30 border border-gray-100 dark:border-gray-800 p-2 flex justify-center items-center">
+            <Gauge value={powerMagnitude} min={0} max={powerGaugeMaxAbs} zones={powerGaugeZones} label="Daya" unit="W" decimals={1} size={72} />
+          </div>
+        </div>
+      </div>
+
+      {/* 3. GRID SEL BATERAI INDIVIDU DENGAN SPARKLINE MINI */}
+      <div className="pt-2">
+        <div className="flex items-center justify-between mb-3">
+          <h5 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+            Individual Cell Voltages ({cellCount} Cells Breakdown)
+          </h5>
+          {hasSpread && (
+            <div className="flex items-center gap-3 text-[11px] text-gray-500">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Max Cell</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> Min Cell</span>
+            </div>
+          )}
+        </div>
+
+        {cellCount === 0 ? (
+          <p className="text-sm text-gray-500 py-4 text-center">Belum ada data cell telemetri untuk pack ini.</p>
+        ) : (
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5">
+            {pack.cells.map((cell, i) => {
+              const isMax = hasSpread && cell.voltage === maxV;
+              const isMin = hasSpread && cell.voltage === minV;
+              const ringClass = isMax
+                ? "ring-2 ring-amber-500 bg-amber-50/30 dark:bg-amber-500/10"
+                : isMin
+                  ? "ring-2 ring-blue-500 bg-blue-50/30 dark:bg-blue-500/10"
+                  : "bg-gray-50/80 dark:bg-gray-900/40 border-gray-100 dark:border-gray-800";
+              
+              const cellHistory = history?.cells.find((c) => c.index === cell.index);
+              const sparklineData = (cellHistory?.voltage ?? []).map((point) => ({
+                x: new Date(point.recordedAt).getTime(),
+                y: point.voltage,
+              }));
+
+              return (
+                <div
+                  key={cell.index}
+                  className={`rounded-xl border p-2.5 text-center transition-all ${ringClass}`}
+                >
+                  <Gauge
+                    value={cell.voltage}
+                    min={CELL_GAUGE_MIN}
+                    max={CELL_GAUGE_MAX}
+                    zones={CELL_GAUGE_ZONES}
+                    label={`Cell ${cell.index}`}
+                    unit="V"
+                    decimals={2}
+                    size={60}
+                  />
+                  {sparklineData.length > 1 && (
+                    <div className="mt-1.5 h-6">
+                      <ReactApexChart
+                        options={{
+                          ...sparklineOptions,
+                          colors: [getSeriesColor(i)],
+                        }}
+                        series={[{ data: sparklineData }]}
+                        type="line"
+                        height={24}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
     </div>
   );
 }
