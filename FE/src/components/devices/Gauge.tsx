@@ -36,6 +36,8 @@ export default function Gauge({
   unit = "",
   decimals = 0,
   size = 72,
+  emptyText = "—",
+  emptyTitle,
 }: {
   value: number | null;
   min: number;
@@ -45,6 +47,9 @@ export default function Gauge({
   unit?: string;
   decimals?: number;
   size?: number;
+  // Teks saat value null (mis. "Error" untuk sensor suhu terlepas) dan tooltip penjelasnya.
+  emptyText?: string;
+  emptyTitle?: string;
 }) {
   const animatedValue = useAnimatedNumber(value);
   const needleValue = animatedValue ?? value;
@@ -86,8 +91,11 @@ export default function Gauge({
           className="absolute left-1/2 flex justify-center pointer-events-none"
           style={{ top: "65%", transform: "translate(-50%, -50%)" }}
         >
-          <span className="text-[11px] font-bold text-gray-900 dark:text-white whitespace-nowrap tracking-tight">
-            {animatedValue != null ? `${animatedValue.toFixed(decimals)}${unit}` : "—"}
+          <span
+            className="text-[11px] font-bold text-gray-900 dark:text-white whitespace-nowrap tracking-tight"
+            title={animatedValue == null ? emptyTitle : undefined}
+          >
+            {animatedValue != null ? `${animatedValue.toFixed(decimals)}${unit}` : emptyText}
           </span>
         </div>
       </div>

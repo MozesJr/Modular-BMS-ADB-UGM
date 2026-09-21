@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseBmsMessage, parseDeviceIdFromTopic, MAX_PAYLOAD_BYTES } from "./schema";
+import { parseBmsMessage, parseDeviceIdFromTopic, MAX_PAYLOAD_BYTES, normalizeTemperatures } from "./schema";
 import { resolveRecordedAt, MAX_CLOCK_SKEW_MS } from "./timestamp";
 
 const validPayload = () => ({
@@ -75,7 +75,7 @@ describe("parseBmsMessage", () => {
     ["packs bukan array", (p: any) => (p.packs = "x")],
     ["voltage negatif", (p: any) => (p.packs[0].cells[0].voltage = -1)],
     ["voltage tidak masuk akal", (p: any) => (p.packs[0].cells[0].voltage = 1e9)],
-    ["suhu di luar rentang", (p: any) => (p.packs[0].temperature = 500)],
+    ["suhu bukan angka", (p: any) => (p.packs[0].temperature = "hot")],
     ["cells kosong", (p: any) => (p.packs[0].cells = [])],
     ["index cell duplikat", (p: any) => (p.packs[0].cells[1].index = 0)],
     ["index pack duplikat", (p: any) => p.packs.push({ ...p.packs[0] })],
@@ -90,6 +90,59 @@ describe("parseBmsMessage", () => {
     const p = validPayload();
     p.packs[0].cells = Array.from({ length: 65 }, (_, i) => ({ index: i, voltage: 3.3 }));
     expect(parseBmsMessage(TOPIC, buf(p)).ok).toBe(false);
+  });
+});
+
+describe("suhu nullable + sensor fault (M0)", () => {
+  const withTemp = (t: unknown) => {
+    const p = validPayload();
+    (p.packs[0] as Record<string, unknown>).temperature = t;
+    return p;
+  };
+  const parse = (t: unknown) => {
+    const r = parseBmsMessage(TOPIC, buf(withTemp(t)));
+    if (!r.ok) throw new Error(`${r.reason}: ${r.detail}`);
+    return r;
+  };
+
+  it("-127 (DS18B20 terlepas) -> temperature null, pesan TIDAK ditolak, tegangan cell tetap ada", () => {
+    const r = parse(-127);
+    expect(r.payload.packs[0].temperature).toBeNull();
+    expect(r.sensorFaults).toBe(1);
+    expect(r.payload.packs[0].cells).toHaveLength(2);
+    expect(r.payload.packs[0].cells[0].voltage).toBe(3.31);
+  });
+  it.each([500, 150.5, -60.5, -1000])("%s di luar rentang -> sensor fault", (t) => {
+    const r = parse(t);
+    expect(r.payload.packs[0].temperature).toBeNull();
+    expect(r.sensorFaults).toBe(1);
+  });
+  it.each([-60, 0, 25.5, 85, 150])("%s dalam rentang -> dipertahankan, bukan fault", (t) => {
+    const r = parse(t);
+    expect(r.payload.packs[0].temperature).toBe(t);
+    expect(r.sensorFaults).toBe(0);
+  });
+  it("null atau dihilangkan = tidak ada pembacaan (bukan fault)", () => {
+    const a = parse(null);
+    expect(a.payload.packs[0].temperature).toBeNull();
+    expect(a.sensorFaults).toBe(0);
+    const p = validPayload();
+    delete (p.packs[0] as Record<string, unknown>).temperature;
+    const b = parseBmsMessage(TOPIC, buf(p));
+    expect(b.ok && b.payload.packs[0].temperature).toBeNull();
+  });
+  it("menghitung fault per pack", () => {
+    const p = validPayload();
+    p.packs.push({ ...p.packs[0], index: 1, temperature: -127 } as (typeof p.packs)[number]);
+    p.packs.push({ ...p.packs[0], index: 2, temperature: 999 } as (typeof p.packs)[number]);
+    const r = parseBmsMessage(TOPIC, buf(p));
+    expect(r.ok && r.sensorFaults).toBe(2);
+  });
+  it("normalizeTemperatures tidak mengubah objek asal", () => {
+    const r = parse(25);
+    const before = JSON.stringify(r.payload);
+    normalizeTemperatures(r.payload);
+    expect(JSON.stringify(r.payload)).toBe(before);
   });
 });
 

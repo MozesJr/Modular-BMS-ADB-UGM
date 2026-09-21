@@ -186,7 +186,7 @@ export default function PackCard({
         {/* Kolom Kanan: Radial Gauges Grid (Suhu, Delta, Arus, Daya, Pack Volts) */}
         <div className="lg:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
           <div className="rounded-xl bg-gray-50/50 dark:bg-gray-900/30 border border-gray-100 dark:border-gray-800 p-2 flex justify-center items-center">
-            <Gauge value={pack.temperature} min={TEMP_GAUGE_MIN} max={TEMP_GAUGE_MAX} zones={TEMP_GAUGE_ZONES} label="Suhu" unit="°C" decimals={1} size={72} />
+            <Gauge value={pack.temperature} min={TEMP_GAUGE_MIN} max={TEMP_GAUGE_MAX} zones={TEMP_GAUGE_ZONES} label="Suhu" unit="°C" decimals={1} size={72} emptyText="Error" emptyTitle="Sensor suhu error / tidak ada pembacaan" />
           </div>
           <div className="rounded-xl bg-gray-50/50 dark:bg-gray-900/30 border border-gray-100 dark:border-gray-800 p-2 flex justify-center items-center">
             <Gauge value={imbalanceMv} min={IMBALANCE_GAUGE_MIN} max={IMBALANCE_GAUGE_MAX} zones={IMBALANCE_GAUGE_ZONES} label="Delta Cell" unit="mV" decimals={0} size={72} />

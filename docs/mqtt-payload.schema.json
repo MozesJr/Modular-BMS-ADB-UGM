@@ -20,9 +20,11 @@
             "maximum": 63
           },
           "temperature": {
-            "type": "number",
-            "minimum": -60,
-            "maximum": 150
+            "description": "°C; null/omitted = no reading; values outside [-60,150] are treated as sensor fault (stored as null)",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "balancerConnected": {
             "type": "boolean"
@@ -78,7 +80,6 @@
         },
         "required": [
           "index",
-          "temperature",
           "balancerConnected",
           "cells"
         ]

@@ -24,7 +24,7 @@ d("ingestion (DB nyata sekali-pakai)", () => {
   let n = 0;
   const serial = () => `TEST-${Date.now()}-${++n}`;
 
-  const payload = (temp: number, volt = 3.3) => ({
+  const payload = (temp: number | null, volt = 3.3) => ({
     timestamp: 0,
     packs: [
       {
@@ -40,7 +40,7 @@ d("ingestion (DB nyata sekali-pakai)", () => {
       },
     ],
   });
-  const job = (deviceId: string, at: string, temp: number, volt?: number) => ({
+  const job = (deviceId: string, at: string, temp: number | null, volt?: number) => ({
     deviceId,
     payload: payload(temp, volt),
     recordedAt: new Date(at),
@@ -101,6 +101,23 @@ d("ingestion (DB nyata sekali-pakai)", () => {
     expect(dev.packs[0].temperature).toBe(30);
     expect(dev.packs[0].cells[0].voltage).toBe(3.4);
     expect(await prisma.packHistory.count({ where: { deviceId: dev.id } })).toBe(2);
+  });
+
+  it("suhu null (sensor fault): disimpan sebagai NULL, tegangan cell tetap tersimpan", async () => {
+    const s = serial();
+    await persistWithRetry(job(s, "2026-09-21T09:00:00.000Z", 25));
+    await persistWithRetry(job(s, "2026-09-21T09:00:05.000Z", null, 3.45));
+    const dev = await prisma.device.findUniqueOrThrow({
+      where: { serialNumber: s },
+      include: { packs: { include: { cells: { orderBy: { index: "asc" } } } } },
+    });
+    expect(dev.packs[0].temperature).toBeNull();
+    expect(dev.packs[0].cells[0].voltage).toBe(3.45);
+    const hist = await prisma.packHistory.findFirstOrThrow({
+      where: { deviceId: dev.id, recordedAt: new Date("2026-09-21T09:00:05.000Z") },
+    });
+    expect(hist.temperature).toBeNull();
+    expect(await prisma.cellHistory.count({ where: { deviceId: dev.id } })).toBe(4);
   });
 
   it("pesan lebih baru menimpa state terbaru", async () => {

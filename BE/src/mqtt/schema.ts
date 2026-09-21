@@ -7,6 +7,11 @@ export const MAX_PAYLOAD_BYTES = 64 * 1024;
 export const MAX_PACKS = 16;
 export const MAX_CELLS_PER_PACK = 64;
 
+// Suhu di luar rentang fisik yang masuk akal dianggap SENSOR FAULT (mis. -127 saat DS18B20 terlepas):
+// nilainya dijadikan null dan dihitung, BUKAN menolak seluruh pesan (tegangan cell tetap disimpan).
+export const TEMPERATURE_MIN_C = -60;
+export const TEMPERATURE_MAX_C = 150;
+
 // device_id di topik = Device.serialNumber. Sengaja ketat: tanpa "/", "+", "#", spasi.
 export const DEVICE_ID_REGEX = /^[A-Za-z0-9._-]{1,64}$/;
 
@@ -27,7 +32,12 @@ export const BmsCellSchema = z.object({
 export const BmsPackSchema = z
   .object({
     index: z.number().int().min(0).max(63),
-    temperature: z.number().min(-60).max(150), // °C
+    // °C. null / dihilangkan = tidak ada pembacaan. Di luar [-60, 150] -> diubah jadi null (sensor fault, lihat normalizeTemperatures).
+    temperature: z
+      .number()
+      .nullish()
+      .transform((v) => v ?? null)
+      .describe("°C; null/omitted = no reading; values outside [-60,150] are treated as sensor fault (stored as null)"),
     balancerConnected: z.boolean(),
     current: optionalNumber(-1000, 1000), // A; negatif = charging, positif = discharging
     power: optionalNumber(-1_000_000, 1_000_000), // W = voltage_pack × current
@@ -58,7 +68,26 @@ export type ParseFailure = {
   detail: string;
   deviceId?: string;
 };
-export type ParseSuccess = { ok: true; deviceId: string; payload: BmsDevicePayload };
+export type ParseSuccess = {
+  ok: true;
+  deviceId: string;
+  payload: BmsDevicePayload;
+  /** jumlah pack yang suhunya di luar rentang dan diubah menjadi null */
+  sensorFaults: number;
+};
+
+// Mengubah suhu di luar rentang menjadi null (sensor fault). Mengembalikan payload baru + jumlah fault.
+export function normalizeTemperatures(payload: BmsDevicePayload): { payload: BmsDevicePayload; sensorFaults: number } {
+  let sensorFaults = 0;
+  const packs = payload.packs.map((p) => {
+    if (p.temperature !== null && (p.temperature < TEMPERATURE_MIN_C || p.temperature > TEMPERATURE_MAX_C)) {
+      sensorFaults++;
+      return { ...p, temperature: null };
+    }
+    return p;
+  });
+  return { payload: { ...payload, packs }, sensorFaults };
+}
 
 // Topik yang valid: bms/{device_id}/data
 export function parseDeviceIdFromTopic(topic: string): string | null {
@@ -89,5 +118,6 @@ export function parseBmsMessage(topic: string, body: Buffer): ParseSuccess | Par
       .join("; ");
     return { ok: false, reason: "schema", detail, deviceId };
   }
-  return { ok: true, deviceId, payload: result.data };
+  const { payload, sensorFaults } = normalizeTemperatures(result.data);
+  return { ok: true, deviceId, payload, sensorFaults };
 }

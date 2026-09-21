@@ -63,6 +63,13 @@ export function registerMqttSubscriber() {
       return;
     }
 
+    if (parsed.sensorFaults > 0) {
+      incr("mqtt.sensor_fault", parsed.sensorFaults);
+      if (shouldLogInvalid(`${parsed.deviceId}:sensor_fault`)) {
+        log.warn("mqtt.sensor_fault", { deviceId: parsed.deviceId, packs: parsed.sensorFaults });
+      }
+    }
+
     const { recordedAt, source } = resolveRecordedAt(parsed.payload.timestamp, receivedAt);
     if (source === "server") incr("mqtt.clock_skewed");
 

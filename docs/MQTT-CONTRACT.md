@@ -45,7 +45,7 @@ JSON UTF-8, **maksimum 65.536 byte**. Field tak dikenal dibuang (tidak ditolak).
 | `timestamp` | integer | ya | Unix epoch **milidetik** dari jam device (lihat §3) | 0 … 2^53−1 |
 | `packs` | array | ya | 1 … 16 pack; `packs[].index` unik | — |
 | `packs[].index` | integer | ya | indeks pack, mulai 0 | 0 … 63 |
-| `packs[].temperature` | number | ya | **°C** (DS18B20) | −60 … 150 |
+| `packs[].temperature` | number \| null | tidak | **°C** (DS18B20). `null`/dihilangkan = tidak ada pembacaan. Nilai di luar rentang = **sensor fault** (diubah jadi `null`, pesan tetap diterima) | −60 … 150 |
 | `packs[].balancerConnected` | boolean | ya | status active balancer EK-C8S5A | — |
 | `packs[].current` | number | tidak | **A**; **negatif = charging, positif = discharging** (ACS712-05B). Boleh dihilangkan/`null` | −1000 … 1000 |
 | `packs[].power` | number | tidak | **W** = tegangan pack × arus. Boleh dihilangkan/`null` | ±1.000.000 |
@@ -55,9 +55,18 @@ JSON UTF-8, **maksimum 65.536 byte**. Field tak dikenal dibuang (tidak ditolak).
 
 **Tidak ada SoC/SoH** di payload (belum didefinisikan). Aplikasi tidak menampilkannya di v1.
 
-Catatan sensor: bila DS18B20 terputus (mis. pembacaan −127 °C) firmware **jangan** mengirim nilai itu; nilai di luar
-rentang membuat *seluruh pesan* ditolak. Opsi yang disarankan: kirim pesan tanpa pack tersebut, atau kirim nilai valid
-terakhir sambil menandai fault lewat mekanisme yang akan didefinisikan (di luar cakupan v1).
+**Sensor suhu terputus / rusak (M0).** DS18B20 yang terlepas biasanya melapor −127 °C (dan 85 °C saat baru reset). Firmware boleh
+mengirim nilai apa adanya *atau* mengirim `null`/menghilangkan field `temperature`. Backend memperlakukannya begini:
+
+| Nilai `temperature` | Hasil |
+|---|---|
+| `null` atau field tidak ada | disimpan `NULL`, dianggap "tidak ada pembacaan" (bukan fault) |
+| dalam [−60, 150] | disimpan apa adanya (termasuk 85 °C — nilai valid, tak bisa dibedakan dari pembacaan nyata) |
+| di luar [−60, 150] (mis. −127) | **sensor fault**: disimpan `NULL`, counter `mqtt.sensor_fault` naik, log `mqtt.sensor_fault` (dibatasi 1/10 dtk/device) |
+| bukan angka (mis. `"hot"`) | seluruh pesan **ditolak** (`mqtt.invalid.schema`) |
+
+Tegangan cell, `balancerConnected`, arus, dan daya pada pesan yang sama **tetap disimpan**. FE/mobile menampilkan `null` sebagai
+"sensor error" / "–".
 
 ## 3. Timestamp (semantik waktu)
 
@@ -77,6 +86,7 @@ Keputusan: **jam device tidak dipercaya penuh** (belum dipastikan firmware sinkr
 
 | Topik | Perilaku |
 |---|---|
+| Sensor fault | Suhu di luar rentang menjadi `null` + counter `mqtt.sensor_fault`; pesan tidak ditolak (lihat §2). |
 | Validasi | Payload divalidasi zod. Yang gagal **dibuang** (tidak disimpan, tidak di-broadcast), dihitung di counter `mqtt.invalid*` dan dicatat sebagai log JSON `mqtt.invalid_payload` (dibatasi 1 log/10 dtk per device+alasan; isi payload tidak dicatat). |
 | Auto-provision | Serial baru otomatis dibuat sebagai `Device` tanpa owner (`verified=false`). Diklaim lewat aplikasi/web. |
 | Idempotensi | Riwayat unik per `(deviceId, packIndex, recordedAt)` (+ `cellIndex` untuk cell). Pesan duplikat (mis. redelivery QoS 1) diabaikan. **Batasan:** bila jam device menyimpang dan `recordedAt` diganti waktu server, redelivery mendapat `receivedAt` berbeda sehingga *bisa* tersimpan ganda. Mitigasi jangka panjang: field `seq` monotonik dari firmware (belum di kontrak). |
@@ -102,6 +112,7 @@ per unit di firmware (NVS). Akan dikerjakan bersama perbaikan `MQTT/` (F-05/F-25
 
 | Perubahan | Firmware | Backend | FE/Mobile |
 |---|---|---|---|
-| Payload invalid kini ditolak (rentang, ukuran, duplikat index) | **Cek**: pesan yang dulu lolos bisa ditolak | ya | — |
+| Payload invalid kini ditolak (ukuran, tipe, duplikat index, rentang selain suhu) | **Cek**: pesan yang dulu lolos bisa ditolak | ya | — |
+| `temperature` boleh `null`; suhu di luar rentang → `null` (bukan tolak pesan) — **M0** | Boleh kirim `null` saat sensor terlepas; tidak wajib | ya | FE/mobile: tampilkan "sensor error"/"–" bila `null` (API: `temperature: number \| null`) |
 | Semantik `timestamp` (§3) | Disarankan NTP | ya | Waktu ISO-8601 UTC dari API |
 | Batas 64 KiB / 16 pack / 64 cell | **Cek** | ya | — |

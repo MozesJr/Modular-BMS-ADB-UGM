@@ -84,7 +84,7 @@ export type BmsUpdatePayload = {
   timestamp: number;
   packs: {
     index: number;
-    temperature: number;
+    temperature: number | null; // null = sensor suhu error / tidak ada pembacaan
     balancerConnected: boolean;
     // Opsional: device lama belum kirim field ini.
     current?: number;
