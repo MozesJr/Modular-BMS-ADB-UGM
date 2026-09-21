@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { broadcast } from "@/lib/ws";
 import { log } from "@/lib/logger";
-import { incr } from "@/lib/runtime-state";
+import { incr, runtime } from "@/lib/runtime-state";
 import { KeyedQueue } from "@/lib/keyed-queue";
 import type { BmsDevicePayload } from "@/mqtt/schema";
 
@@ -194,22 +194,23 @@ function getQueue(): KeyedQueue<IngestJob> {
       incr("mqtt.failed");
       log.error("ingest.persist_failed", { deviceId: key, err });
     },
+    onSettled: () => {
+      runtime().ingestQueueDepth = queue?.size ?? 0;
+    },
   });
   return queue;
 }
 
 export function enqueueIngest(job: IngestJob) {
-  const result = getQueue().enqueue(job.deviceId, job);
+  const q = getQueue();
+  const result = q.enqueue(job.deviceId, job);
+  runtime().ingestQueueDepth = q.size;
   if (result === "queued_dropped_oldest") incr("mqtt.dropped");
   if (result === "rejected_full" || result === "rejected_closed") {
     incr("mqtt.dropped");
     log.warn("ingest.dropped", { deviceId: job.deviceId, reason: result });
   }
   return result;
-}
-
-export function ingestQueueSize(): number {
-  return queue?.size ?? 0;
 }
 
 // Dipanggil saat shutdown: berhenti menerima, tunggu yang sedang berjalan. Mengembalikan sisa.

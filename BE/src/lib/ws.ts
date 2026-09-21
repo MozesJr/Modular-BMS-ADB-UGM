@@ -18,3 +18,9 @@ export function broadcast(event: string, payload: unknown) {
     }
   });
 }
+// Dipakai saat shutdown: tutup semua koneksi dengan kode 1001 (going away) supaya klien reconnect ke instance baru.
+export function closeAllClients(reason = "server shutting down") {
+  if (!wssInstance) return;
+  wssInstance.clients.forEach((client) => client.close(1001, reason));
+  wssInstance.close();
+}

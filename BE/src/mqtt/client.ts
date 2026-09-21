@@ -82,3 +82,13 @@ export function registerMqttSubscriber() {
 
   return client;
 }
+
+// Shutdown: berhenti menerima pesan baru (unsubscribe + tutup koneksi dengan bersih).
+export async function stopMqttSubscriber(): Promise<void> {
+  if (!client) return;
+  const c = client;
+  client = null;
+  await new Promise<void>((resolve) => c.end(false, {}, () => resolve()));
+  runtime().mqtt.connected = false;
+  log.info("mqtt.stopped");
+}

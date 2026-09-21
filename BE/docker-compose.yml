@@ -15,10 +15,28 @@ services:
       - bms-network
       - master-db-network
     restart: unless-stopped
+    # PID 1 = init kecil (meneruskan SIGTERM & membersihkan zombie); server.ts melakukan graceful shutdown.
+    init: true
+    stop_grace_period: 30s
+    # HEALTHCHECK didefinisikan di BE/Dockerfile (GET /api/health).
     # BE tidak perlu diexpose ke publik (FE yang jadi entry point, proxy internal via rewrites()).
     # Buka port ini hanya untuk debugging lokal di VPS, dan hanya ke loopback:
     # ports:
     #   - "127.0.0.1:4000:4000"
+
+  # Menjalankan migrasi Prisma secara MANUAL dan terkontrol (tidak ikut `compose up`):
+  #   docker compose --profile tools run --rm backend-migrate
+  backend-migrate:
+    profiles: ["tools"]
+    build:
+      context: .
+      target: migrator
+    image: bms-backend-migrator:local
+    env_file:
+      - .env.production
+    networks:
+      - master-db-network
+    restart: "no"
 
 networks:
   bms-network:

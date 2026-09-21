@@ -11,6 +11,8 @@ export interface KeyedQueueOptions<T> {
   maxTotal: number;
   worker: (key: string, item: T) => Promise<void>;
   onError?: (key: string, err: unknown) => void;
+  // Dipanggil setiap satu item selesai (berhasil atau gagal), setelah antrean diperbarui.
+  onSettled?: () => void;
 }
 
 export class KeyedQueue<T> {
@@ -75,6 +77,7 @@ export class KeyedQueue<T> {
           if (rest && rest.length > 0) this.ready.push(key);
           else this.pending.delete(key);
           this.pump();
+          this.opts.onSettled?.();
           this.notifyIfIdle();
         });
     }

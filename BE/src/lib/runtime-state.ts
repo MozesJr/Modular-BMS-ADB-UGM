@@ -10,6 +10,7 @@ export interface RuntimeState {
     lastConnectAt: number | null;
     lastMessageAt: number | null;
   };
+  ingestQueueDepth: number;
   counters: Record<string, number>;
 }
 
@@ -23,6 +24,7 @@ export function runtime(): RuntimeState {
       startedAt: Date.now(),
       shuttingDown: false,
       mqtt: { connected: false, lastConnectAt: null, lastMessageAt: null },
+      ingestQueueDepth: 0,
       counters: {},
     };
   }
