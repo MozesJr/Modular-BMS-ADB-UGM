@@ -33,6 +33,12 @@ const nextConfig: NextConfig = {
         source: "/api/backend/:path*",
         destination: `${BACKEND_URL}/api/:path*`,
       },
+      // API v1 untuk aplikasi mobile: klien native memanggil origin publik yang sama (Nginx -> FE), dan FE meneruskan
+      // ke BE (BE tidak pernah diexpose langsung). Header Authorization dan X-Real-IP ikut diteruskan apa adanya.
+      {
+        source: "/api/v1/:path*",
+        destination: `${BACKEND_URL}/api/v1/:path*`,
+      },
     ];
   },
 };
