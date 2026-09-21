@@ -1,11 +1,8 @@
 import mqtt, { MqttClient } from "mqtt";
-import type { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
-import { broadcast } from "@/lib/ws";
 import { log } from "@/lib/logger";
 import { incr, runtime } from "@/lib/runtime-state";
 import { parseBmsMessage } from "@/mqtt/schema";
-import type { BmsDevicePayload } from "@/mqtt/schema";
+import { enqueueIngest } from "@/mqtt/ingest";
 import { resolveRecordedAt } from "@/mqtt/timestamp";
 
 // Pesan invalid dari device yang rusak bisa datang tiap detik; batasi log-nya (counter tetap akurat).
@@ -44,7 +41,7 @@ export function registerMqttSubscriber() {
     });
   });
 
-  client.on("message", async (topic, payloadBuf) => {
+  client.on("message", (topic, payloadBuf) => {
     const receivedAt = new Date();
     runtime().mqtt.lastMessageAt = receivedAt.getTime();
     incr("mqtt.received");
@@ -66,23 +63,11 @@ export function registerMqttSubscriber() {
       return;
     }
 
-    try {
-      const { recordedAt, source } = resolveRecordedAt(parsed.payload.timestamp, receivedAt);
-      if (source === "server") incr("mqtt.clock_skewed");
+    const { recordedAt, source } = resolveRecordedAt(parsed.payload.timestamp, receivedAt);
+    if (source === "server") incr("mqtt.clock_skewed");
 
-      const device = await persistPayload(parsed.deviceId, parsed.payload, recordedAt);
-      incr("mqtt.stored");
-      broadcast("bms:update", {
-        id: device.id,
-        serialNumber: device.serialNumber,
-        timestamp: recordedAt.getTime(),
-        receivedAt: receivedAt.getTime(),
-        packs: parsed.payload.packs,
-      });
-    } catch (err) {
-      incr("mqtt.failed");
-      log.error("mqtt.persist_failed", { deviceId: parsed.deviceId, err });
-    }
+    // Tidak menunggu DB di sini: masuk antrean bounded per device (lihat mqtt/ingest.ts).
+    enqueueIngest({ deviceId: parsed.deviceId, payload: parsed.payload, recordedAt, receivedAt });
   });
 
   client.on("error", (err) => log.error("mqtt.error", { err }));
@@ -96,73 +81,4 @@ export function registerMqttSubscriber() {
   client.on("offline", () => log.info("mqtt.offline"));
 
   return client;
-}
-
-// Simpan payload MQTT: upsert latest-state (Pack/Cell, buat tampilan real-time) +
-// insert history (PackHistory/CellHistory, buat grafik tren) dalam satu transaksi.
-//
-// Kalau serialNumber belum pernah terdaftar, device di-auto-provision (ownerId: null,
-// verified: false) — data TETAP disimpan. Verifikasi/ownership itu urusan terpisah
-// (lihat POST /api/devices), bukan gating di level ingestion.
-async function persistPayload(mqttDeviceId: string, payload: BmsDevicePayload, recordedAt: Date) {
-
-  return prisma.$transaction(async (tx) => {
-    const device = await tx.device.upsert({
-      where: { serialNumber: mqttDeviceId },
-      create: { serialNumber: mqttDeviceId },
-      update: {},
-    });
-
-    const packHistoryRows: Prisma.PackHistoryCreateManyInput[] = [];
-    const cellHistoryRows: Prisma.CellHistoryCreateManyInput[] = [];
-
-    for (const pack of payload.packs) {
-      const packRow = await tx.pack.upsert({
-        where: { deviceId_index: { deviceId: device.id, index: pack.index } },
-        create: {
-          deviceId: device.id,
-          index: pack.index,
-          temperature: pack.temperature,
-          balancerConnected: pack.balancerConnected,
-          current: pack.current ?? null,
-          power: pack.power ?? null,
-        },
-        update: {
-          temperature: pack.temperature,
-          balancerConnected: pack.balancerConnected,
-          current: pack.current ?? null,
-          power: pack.power ?? null,
-        },
-      });
-
-      packHistoryRows.push({
-        deviceId: device.id,
-        packIndex: pack.index,
-        temperature: pack.temperature,
-        balancerConnected: pack.balancerConnected,
-        recordedAt,
-      });
-
-      for (const cell of pack.cells) {
-        await tx.cell.upsert({
-          where: { packId_index: { packId: packRow.id, index: cell.index } },
-          create: { packId: packRow.id, index: cell.index, voltage: cell.voltage },
-          update: { voltage: cell.voltage },
-        });
-
-        cellHistoryRows.push({
-          deviceId: device.id,
-          packIndex: pack.index,
-          cellIndex: cell.index,
-          voltage: cell.voltage,
-          recordedAt,
-        });
-      }
-    }
-
-    if (packHistoryRows.length) await tx.packHistory.createMany({ data: packHistoryRows });
-    if (cellHistoryRows.length) await tx.cellHistory.createMany({ data: cellHistoryRows });
-
-    return device;
-  });
 }

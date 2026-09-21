@@ -82,6 +82,10 @@ model Pack {
   current           Float? // Ampere, dari sensor ACS712-05B — negatif = charging, positif = discharging
   power             Float? // Watt, = voltage_pack x current
   cells             Cell[]
+  // Waktu data terakhir yang tersimpan di baris ini (recordedAt hasil resolve, lihat docs/MQTT-CONTRACT.md §3).
+  // Dipakai agar pesan yang lebih lama/terlambat tidak menimpa state terbaru. null = baris lama.
+  recordedAt        DateTime?
+  receivedAt        DateTime? // waktu server menerima pesan MQTT itu
   updatedAt         DateTime @updatedAt
 
   @@unique([deviceId, index])
@@ -109,10 +113,12 @@ model PackHistory {
   packIndex         Int
   temperature       Float?
   balancerConnected Boolean
-  recordedAt        DateTime // dari payload.timestamp (waktu firmware), bukan waktu insert DB
+  recordedAt        DateTime // waktu efektif data: jam device bila wajar, selain itu waktu server (§3 kontrak MQTT)
+  receivedAt        DateTime? // waktu server menerima pesan (null = baris lama sebelum kolom ini ada)
   createdAt         DateTime @default(now())
 
-  @@index([deviceId, packIndex, recordedAt])
+  // Idempotensi: pesan duplikat (redelivery QoS 1) di-skip lewat createMany({ skipDuplicates }).
+  @@unique([deviceId, packIndex, recordedAt])
 }
 
 // Time-series history per cell, buat grafik tren.
@@ -126,5 +132,5 @@ model CellHistory {
   recordedAt DateTime
   createdAt  DateTime @default(now())
 
-  @@index([deviceId, packIndex, cellIndex, recordedAt])
+  @@unique([deviceId, packIndex, cellIndex, recordedAt])
 }
