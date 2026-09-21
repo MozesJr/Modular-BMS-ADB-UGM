@@ -2,7 +2,12 @@ import "./openapi-setup";
 import { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z, type ZodType } from "zod";
 import {
+  AddCollaboratorRequestSchema,
+  ClaimDeviceRequestSchema,
+  CollaboratorListSchema,
+  CollaboratorSchema,
   DashboardSummarySchema,
+  DeleteDeviceQuerySchema,
   DeviceDetailSchema,
   DeviceListResponseSchema,
   DevicesQuerySchema,
@@ -15,6 +20,8 @@ import {
   LogoutRequestSchema,
   RefreshRequestSchema,
   TokenResponseSchema,
+  UpdateCollaboratorRequestSchema,
+  UpdateDeviceRequestSchema,
 } from "./schemas";
 
 // Registri endpoint untuk docs/openapi.json. SETIAP endpoint v1 yang diimplementasikan didaftarkan di sini dengan
@@ -62,6 +69,11 @@ export interface EndpointDef {
 }
 
 const ETAG_HEADER = { ETag: { description: "Validator. Kirim balik sebagai If-None-Match pada permintaan berikutnya." } };
+
+const CollabParams = z.object({
+  id: z.string().openapi({ description: "ID device." }),
+  userId: z.string().openapi({ description: "ID user collaborator." }),
+});
 
 const IdParam = z.object({ id: z.string().openapi({ description: "ID device (bukan serialNumber)." }) });
 
@@ -263,4 +275,103 @@ endpoint({
   errors: [400, 401, 404],
   headers: ETAG_HEADER,
   notModified: true,
+});
+
+// ---------------------------------------------------------------------------------------------
+// Manajemen device & collaborator (B5). Hak: viewer = lihat; editor = lihat + ubah nama; owner = semuanya
+// (kelola collaborator, lepas/hapus device). Non-anggota selalu 404.
+// ---------------------------------------------------------------------------------------------
+endpoint({
+  method: "post",
+  path: "/api/v1/devices",
+  tag: "Device",
+  summary: "Daftarkan / klaim device",
+  description:
+    "Mendaftarkan device dengan `serialNumber` (ID/lisensi fisik; huruf, angka, `.`, `-`, `_`, maks 64). Device baru `verified=false` sampai admin menyetujui. " +
+    "Bila serial itu sudah pernah mengirim data dan belum dimiliki siapa pun, device itu diklaim beserta riwayatnya. " +
+    "409 DEVICE_ALREADY_CLAIMED bila sudah punya owner. Batas: 20 klaim/jam per user.",
+  operationId: "claimDevice",
+  body: ClaimDeviceRequestSchema,
+  success: { status: 201, description: "Device milik Anda", schema: DeviceDetailSchema },
+  errors: [400, 401, 409, 429],
+});
+
+endpoint({
+  method: "patch",
+  path: "/api/v1/devices/{id}",
+  tag: "Device",
+  summary: "Ubah nama device",
+  description: "Owner atau editor.",
+  operationId: "updateDevice",
+  params: IdParam,
+  body: UpdateDeviceRequestSchema,
+  success: { status: 200, description: "Device setelah diubah", schema: DeviceDetailSchema },
+  errors: [400, 401, 403, 404],
+});
+
+endpoint({
+  method: "delete",
+  path: "/api/v1/devices/{id}",
+  tag: "Device",
+  summary: "Lepas (unclaim) atau hapus device",
+  description:
+    "Hanya owner. `mode=unclaim` (default): melepas kepemilikan — data tetap, nama dikosongkan, `verified` kembali false, semua collaborator dilepas. " +
+    "`mode=delete`: hapus permanen device + seluruh riwayat; wajib `confirmSerial` = serialNumber. Perangkat yang masih mengirim data akan muncul lagi sebagai device baru tanpa owner.",
+  operationId: "deleteDevice",
+  params: IdParam,
+  query: DeleteDeviceQuerySchema,
+  success: { status: 204, description: "Selesai" },
+  errors: [400, 401, 403, 404],
+});
+
+endpoint({
+  method: "get",
+  path: "/api/v1/devices/{id}/collaborators",
+  tag: "Collaborator",
+  summary: "Daftar collaborator",
+  description: "Semua anggota boleh melihat; `email` hanya terisi untuk OWNER (selain itu null).",
+  operationId: "listCollaborators",
+  params: IdParam,
+  success: { status: 200, description: "Collaborator", schema: CollaboratorListSchema },
+  errors: [401, 404],
+});
+
+endpoint({
+  method: "post",
+  path: "/api/v1/devices/{id}/collaborators",
+  tag: "Collaborator",
+  summary: "Undang collaborator",
+  description:
+    "Hanya owner. Mengundang user terdaftar lewat email sebagai `viewer` (default) atau `editor`. Kode: USER_NOT_FOUND (404), ALREADY_COLLABORATOR (409). " +
+    "Batas: 30 undangan/jam per user (mencegah enumerasi email).",
+  operationId: "addCollaborator",
+  params: IdParam,
+  body: AddCollaboratorRequestSchema,
+  success: { status: 201, description: "Collaborator ditambahkan", schema: CollaboratorSchema },
+  errors: [400, 401, 403, 404, 409, 429],
+});
+
+endpoint({
+  method: "patch",
+  path: "/api/v1/devices/{id}/collaborators/{userId}",
+  tag: "Collaborator",
+  summary: "Ubah peran collaborator",
+  description: "Hanya owner.",
+  operationId: "updateCollaborator",
+  params: CollabParams,
+  body: UpdateCollaboratorRequestSchema,
+  success: { status: 200, description: "Collaborator setelah diubah", schema: CollaboratorSchema },
+  errors: [400, 401, 403, 404],
+});
+
+endpoint({
+  method: "delete",
+  path: "/api/v1/devices/{id}/collaborators/{userId}",
+  tag: "Collaborator",
+  summary: "Cabut collaborator / keluar",
+  description: "Owner mencabut siapa pun; collaborator boleh keluar sendiri (userId = dirinya). Selain itu 403. COLLABORATOR_NOT_FOUND (404) bila bukan anggota.",
+  operationId: "removeCollaborator",
+  params: CollabParams,
+  success: { status: 204, description: "Dicabut" },
+  errors: [401, 403, 404],
 });

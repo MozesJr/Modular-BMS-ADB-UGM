@@ -7,7 +7,7 @@ import { PrismaClient } from "@prisma/client";
 import { createUser, makeClient, Reporter, requireTestDb, seedDevice, spawnServer, waitHealth, serverEnv, SMOKE_NEXTAUTH_SECRET } from "./_smoke-lib";
 import { spawnSync } from "node:child_process";
 import {
-  TokenResponseSchema, ErrorResponseSchema, MeSchema, DeviceListResponseSchema, DeviceDetailSchema, DashboardSummarySchema, HistoryResponseSchema,
+  TokenResponseSchema, ErrorResponseSchema, MeSchema, CollaboratorListSchema, DeviceListResponseSchema, DeviceDetailSchema, DashboardSummarySchema, HistoryResponseSchema,
 } from "../src/contracts/schemas";
 import { SignJWT } from "jose";
 
@@ -230,6 +230,103 @@ async function historySection(ctx: Awaited<ReturnType<typeof readSection>>) {
   R.ok("history mendukung ETag: If-None-Match sama -> 304", (await q("", ot, { "if-none-match": etag })).status === 304);
 }
 
+async function manageSection() {
+  const owner = await createUser(prisma, `mo${tag}@smoke.test`, PW, { name: "Owner M" });
+  const editor = await createUser(prisma, `me${tag}@smoke.test`, PW, { name: "Editor M" });
+  const viewer = await createUser(prisma, `mv${tag}@smoke.test`, PW, { name: "Viewer M" });
+  const other = await createUser(prisma, `mx${tag}@smoke.test`, PW, { name: "Other M" });
+  const ot = await loginToken(owner.email, "10.4.0.1");
+  const et = await loginToken(editor.email, "10.4.0.2");
+  const vt = await loginToken(viewer.email, "10.4.0.3");
+  const xt = await loginToken(other.email, "10.4.0.4");
+
+  // ---- klaim ----
+  const serial = `MG-${tag}`;
+  const bad = await call("POST", "/api/v1/devices", { token: ot, body: { serialNumber: "bad/serial" } });
+  R.ok("klaim serial tak aman -> 400 VALIDATION_ERROR", bad.status === 400 && bad.json?.error?.code === "VALIDATION_ERROR");
+  const c1 = await call("POST", "/api/v1/devices", { token: ot, body: { serialNumber: serial, name: "Unit M" } });
+  const dev = R.schema("klaim device baru", DeviceDetailSchema, c1.json);
+  R.ok("klaim baru -> 201, role owner, verified=false, nama tersimpan", c1.status === 201 && dev?.role === "owner" && dev.verified === false && dev.name === "Unit M");
+  R.ok("klaim serial yang sudah dimiliki orang lain -> 409 DEVICE_ALREADY_CLAIMED", (await call("POST", "/api/v1/devices", { token: xt, body: { serialNumber: serial } })).json?.error?.code === "DEVICE_ALREADY_CLAIMED");
+  const devId = dev!.id;
+
+  // device auto-provision (tanpa owner) yang sudah punya data -> klaim membawa data
+  const auto = await seedDevice(prisma, { serial: `AUTO-${tag}`, ownerId: null, receivedAt: new Date(), packs: [{ index: 0, temperature: 25, power: 5, cells: [3.3, 3.31] }] });
+  const c2 = await call("POST", "/api/v1/devices", { token: xt, body: { serialNumber: `AUTO-${tag}`, name: "Diklaim" } });
+  R.ok("klaim device auto-provision -> 201 dengan pack/riwayat ikut", c2.status === 201 && c2.json.id === auto.id && c2.json.packs.length === 1 && c2.json.online === true);
+
+  // ---- collaborator: undang ----
+  const add = (token: string, body: unknown) => call("POST", `/api/v1/devices/${devId}/collaborators`, { token, body });
+  const a1 = await add(ot, { email: editor.email, role: "editor" });
+  R.ok("owner mengundang editor -> 201, email terlihat", a1.status === 201 && a1.json.role === "editor" && a1.json.email === editor.email);
+  const a2 = await add(ot, { email: viewer.email });
+  R.ok("undang tanpa role -> default viewer", a2.status === 201 && a2.json.role === "viewer");
+  R.ok("undang duplikat -> 409 ALREADY_COLLABORATOR", (await add(ot, { email: viewer.email })).json?.error?.code === "ALREADY_COLLABORATOR");
+  R.ok("undang diri sendiri -> 400", (await add(ot, { email: owner.email })).status === 400);
+  R.ok("undang email tak terdaftar -> 404 USER_NOT_FOUND", (await add(ot, { email: `ghost${tag}@smoke.test` })).json?.error?.code === "USER_NOT_FOUND");
+  R.ok("role tidak valid -> 400", (await add(ot, { email: other.email, role: "owner" })).status === 400);
+  R.ok("editor TIDAK boleh mengundang -> 403", (await add(et, { email: other.email })).status === 403);
+  R.ok("viewer TIDAK boleh mengundang -> 403", (await add(vt, { email: other.email })).status === 403);
+  R.ok("orang asing mengundang -> 404 (device tidak bocor)", (await add(xt, { email: other.email })).status === 404);
+
+  // ---- collaborator: daftar (email hanya untuk owner) ----
+  const listO = await call("GET", `/api/v1/devices/${devId}/collaborators`, { token: ot });
+  R.schema("daftar collaborator (owner)", CollaboratorListSchema, listO.json);
+  R.ok("owner: 2 collaborator DENGAN email", listO.json.items.length === 2 && listO.json.items.every((c: any) => typeof c.email === "string"));
+  const listE = await call("GET", `/api/v1/devices/${devId}/collaborators`, { token: et });
+  R.ok("editor: melihat daftar tetapi SEMUA email null", listE.status === 200 && listE.json.items.length === 2 && listE.json.items.every((c: any) => c.email === null) && !JSON.stringify(listE.json).includes(viewer.email));
+  R.ok("orang asing -> 404", (await call("GET", `/api/v1/devices/${devId}/collaborators`, { token: xt })).status === 404);
+
+  // ---- ubah nama: owner/editor boleh, viewer tidak ----
+  const rn = (token: string, name: string) => call("PATCH", `/api/v1/devices/${devId}`, { token, body: { name } });
+  R.ok("editor mengubah nama -> 200", (await rn(et, "Nama dari Editor")).json?.name === "Nama dari Editor");
+  R.ok("owner mengubah nama -> 200", (await rn(ot, "Nama dari Owner")).status === 200);
+  R.ok("viewer mengubah nama -> 403", (await rn(vt, "x")).status === 403);
+  R.ok("orang asing mengubah nama -> 404", (await rn(xt, "x")).status === 404);
+  R.ok("nama kosong -> 400", (await rn(ot, "   ")).status === 400);
+
+  // ---- ubah peran ----
+  const setRole = (token: string, userId: string, role: string) => call("PATCH", `/api/v1/devices/${devId}/collaborators/${userId}`, { token, body: { role } });
+  R.ok("owner: viewer -> editor", (await setRole(ot, viewer.id, "editor")).json?.role === "editor");
+  R.ok("viewer yang naik jadi editor kini boleh ubah nama", (await rn(vt, "Diubah bekas viewer")).status === 200);
+  R.ok("editor tidak boleh mengubah peran -> 403", (await setRole(et, viewer.id, "viewer")).status === 403);
+  R.ok("ubah peran user yang bukan collaborator -> 404 COLLABORATOR_NOT_FOUND", (await setRole(ot, other.id, "viewer")).json?.error?.code === "COLLABORATOR_NOT_FOUND");
+  await setRole(ot, viewer.id, "viewer");
+
+  // ---- cabut / keluar ----
+  const del = (token: string, userId: string) => call("DELETE", `/api/v1/devices/${devId}/collaborators/${userId}`, { token });
+  R.ok("viewer mencabut collaborator lain -> 403", (await del(vt, editor.id)).status === 403);
+  R.ok("viewer KELUAR sendiri -> 204", (await del(vt, viewer.id)).status === 204);
+  R.ok("setelah keluar viewer tak lagi punya akses -> 404", (await call("GET", `/api/v1/devices/${devId}`, { token: vt })).status === 404);
+  R.ok("keluar lagi -> 404 COLLABORATOR_NOT_FOUND", (await del(vt, viewer.id)).status === 404);
+  R.ok("owner mencabut editor -> 204", (await del(ot, editor.id)).status === 204);
+
+  // ---- unclaim ----
+  await call("POST", `/api/v1/devices/${devId}/collaborators`, { token: ot, body: { email: editor.email } });
+  R.ok("editor mencoba unclaim -> 403", (await call("DELETE", `/api/v1/devices/${devId}`, { token: et })).status === 403);
+  R.ok("owner unclaim (default) -> 204", (await call("DELETE", `/api/v1/devices/${devId}`, { token: ot })).status === 204);
+  const afterUnclaim = await prisma.device.findUnique({ where: { id: devId }, include: { collaborators: true } });
+  R.ok("unclaim: owner null, nama null, verified false, collaborator dilepas, device & data tetap ada", afterUnclaim?.ownerId === null && afterUnclaim.name === null && afterUnclaim.verified === false && afterUnclaim.collaborators.length === 0);
+  R.ok("owner lama tidak lagi punya akses -> 404", (await call("GET", `/api/v1/devices/${devId}`, { token: ot })).status === 404);
+  const reclaim = await call("POST", "/api/v1/devices", { token: xt, body: { serialNumber: serial } });
+  R.ok("device yang di-unclaim bisa diklaim user lain", reclaim.status === 201 && reclaim.json.role === "owner");
+
+  // ---- hapus permanen ----
+  await prisma.packHistory.create({ data: { deviceId: devId, packIndex: 0, recordedAt: new Date(), temperature: 20, balancerConnected: true } });
+  R.ok("hapus tanpa confirmSerial -> 400", (await call("DELETE", `/api/v1/devices/${devId}?mode=delete`, { token: xt })).status === 400);
+  R.ok("hapus dengan confirmSerial salah -> 400", (await call("DELETE", `/api/v1/devices/${devId}?mode=delete&confirmSerial=salah`, { token: xt })).status === 400);
+  R.ok("hapus oleh non-owner -> 404/403 (bukan 204)", [403, 404].includes((await call("DELETE", `/api/v1/devices/${devId}?mode=delete&confirmSerial=${serial}`, { token: ot })).status));
+  R.ok("owner menghapus permanen dengan konfirmasi -> 204", (await call("DELETE", `/api/v1/devices/${devId}?mode=delete&confirmSerial=${serial}`, { token: xt })).status === 204);
+  R.ok("device dan riwayatnya terhapus (cascade)", (await prisma.device.count({ where: { id: devId } })) === 0 && (await prisma.packHistory.count({ where: { deviceId: devId } })) === 0);
+
+  // ---- batas klaim ----
+  const spammer = await createUser(prisma, `sp${tag}@smoke.test`, PW);
+  const st = await loginToken(spammer.email, "10.4.0.9");
+  let last;
+  for (let i = 0; i < 22; i++) last = await call("POST", "/api/v1/devices", { token: st, body: { serialNumber: `SPAM-${tag}-${i}` } });
+  R.ok("klaim dibatasi 20/jam per user -> 429", last?.status === 429 && last.json?.error?.code === "RATE_LIMITED", String(last?.status));
+}
+
 async function main() {
   let server: ReturnType<typeof spawnServer> | null = null;
   if (!process.env.SMOKE_BASE_URL) server = spawnServer(dbUrl, PORT);
@@ -238,6 +335,7 @@ async function main() {
     await authSection();
     const ctx = await readSection();
     await historySection(ctx);
+    await manageSection();
 
     // fail-fast: server menolak start tanpa JWT_ACCESS_SECRET (dijalankan terpisah, port lain)
     const bad = spawnSync("npx", ["tsx", "src/server.ts"], {

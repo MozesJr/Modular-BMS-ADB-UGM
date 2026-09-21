@@ -867,6 +867,77 @@
           "min",
           "max"
         ]
+      },
+      "ClaimDeviceRequest": {
+        "type": "object",
+        "properties": {
+          "serialNumber": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "serialNumber"
+        ]
+      },
+      "UpdateDeviceRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "CollaboratorList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Collaborator"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AddCollaboratorRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 254,
+            "format": "email"
+          },
+          "role": {
+            "$ref": "#/components/schemas/CollaboratorRole"
+          }
+        },
+        "required": [
+          "email"
+        ]
+      },
+      "UpdateCollaboratorRequest": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/CollaboratorRole"
+          }
+        },
+        "required": [
+          "role"
+        ]
       }
     },
     "parameters": {}
@@ -1327,6 +1398,91 @@
             }
           }
         }
+      },
+      "post": {
+        "tags": [
+          "Device"
+        ],
+        "summary": "Daftarkan / klaim device",
+        "description": "Mendaftarkan device dengan `serialNumber` (ID/lisensi fisik; huruf, angka, `.`, `-`, `_`, maks 64). Device baru `verified=false` sampai admin menyetujui. Bila serial itu sudah pernah mengirim data dan belum dimiliki siapa pun, device itu diklaim beserta riwayatnya. 409 DEVICE_ALREADY_CLAIMED bila sudah punya owner. Batas: 20 klaim/jam per user.",
+        "operationId": "claimDevice",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimDeviceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Device milik Anda",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR / INVALID_JSON: request tidak valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: token hilang/kedaluwarsa/dicabut (atau kredensial salah)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT: bentrok dengan keadaan saat ini",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: tunggu sesuai header Retry-After",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL: kesalahan server (sertakan requestId saat melapor)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/devices/{id}": {
@@ -1378,6 +1534,208 @@
           },
           "401": {
             "description": "UNAUTHORIZED: token hilang/kedaluwarsa/dicabut (atau kredensial salah)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: resource tidak ada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL: kesalahan server (sertakan requestId saat melapor)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Device"
+        ],
+        "summary": "Ubah nama device",
+        "description": "Owner atau editor.",
+        "operationId": "updateDevice",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "ID device (bukan serialNumber)."
+            },
+            "required": true,
+            "description": "ID device (bukan serialNumber).",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDeviceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Device setelah diubah",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR / INVALID_JSON: request tidak valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: token hilang/kedaluwarsa/dicabut (atau kredensial salah)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN: tidak punya hak pada resource ini",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: resource tidak ada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL: kesalahan server (sertakan requestId saat melapor)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Device"
+        ],
+        "summary": "Lepas (unclaim) atau hapus device",
+        "description": "Hanya owner. `mode=unclaim` (default): melepas kepemilikan — data tetap, nama dikosongkan, `verified` kembali false, semua collaborator dilepas. `mode=delete`: hapus permanen device + seluruh riwayat; wajib `confirmSerial` = serialNumber. Perangkat yang masih mengirim data akan muncul lagi sebagai device baru tanpa owner.",
+        "operationId": "deleteDevice",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "ID device (bukan serialNumber)."
+            },
+            "required": true,
+            "description": "ID device (bukan serialNumber).",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "unclaim",
+                "delete"
+              ],
+              "default": "unclaim",
+              "description": "`unclaim`: lepas kepemilikan (data tetap, device kembali tanpa owner, collaborator dilepas). `delete`: hapus device + seluruh riwayat (wajib confirmSerial)."
+            },
+            "required": false,
+            "description": "`unclaim`: lepas kepemilikan (data tetap, device kembali tanpa owner, collaborator dilepas). `delete`: hapus device + seluruh riwayat (wajib confirmSerial).",
+            "name": "mode",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Wajib = serialNumber bila mode=delete."
+            },
+            "required": false,
+            "description": "Wajib = serialNumber bila mode=delete.",
+            "name": "confirmSerial",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Selesai"
+          },
+          "400": {
+            "description": "VALIDATION_ERROR / INVALID_JSON: request tidak valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: token hilang/kedaluwarsa/dicabut (atau kredensial salah)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN: tidak punya hak pada resource ini",
             "content": {
               "application/json": {
                 "schema": {
@@ -1597,6 +1955,381 @@
           },
           "401": {
             "description": "UNAUTHORIZED: token hilang/kedaluwarsa/dicabut (atau kredensial salah)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: resource tidak ada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL: kesalahan server (sertakan requestId saat melapor)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/collaborators": {
+      "get": {
+        "tags": [
+          "Collaborator"
+        ],
+        "summary": "Daftar collaborator",
+        "description": "Semua anggota boleh melihat; `email` hanya terisi untuk OWNER (selain itu null).",
+        "operationId": "listCollaborators",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "ID device (bukan serialNumber)."
+            },
+            "required": true,
+            "description": "ID device (bukan serialNumber).",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Collaborator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollaboratorList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: token hilang/kedaluwarsa/dicabut (atau kredensial salah)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: resource tidak ada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL: kesalahan server (sertakan requestId saat melapor)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Collaborator"
+        ],
+        "summary": "Undang collaborator",
+        "description": "Hanya owner. Mengundang user terdaftar lewat email sebagai `viewer` (default) atau `editor`. Kode: USER_NOT_FOUND (404), ALREADY_COLLABORATOR (409). Batas: 30 undangan/jam per user (mencegah enumerasi email).",
+        "operationId": "addCollaborator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "ID device (bukan serialNumber)."
+            },
+            "required": true,
+            "description": "ID device (bukan serialNumber).",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddCollaboratorRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Collaborator ditambahkan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Collaborator"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR / INVALID_JSON: request tidak valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: token hilang/kedaluwarsa/dicabut (atau kredensial salah)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN: tidak punya hak pada resource ini",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: resource tidak ada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT: bentrok dengan keadaan saat ini",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED: tunggu sesuai header Retry-After",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL: kesalahan server (sertakan requestId saat melapor)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/collaborators/{userId}": {
+      "patch": {
+        "tags": [
+          "Collaborator"
+        ],
+        "summary": "Ubah peran collaborator",
+        "description": "Hanya owner.",
+        "operationId": "updateCollaborator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "ID device."
+            },
+            "required": true,
+            "description": "ID device.",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "ID user collaborator."
+            },
+            "required": true,
+            "description": "ID user collaborator.",
+            "name": "userId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCollaboratorRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Collaborator setelah diubah",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Collaborator"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR / INVALID_JSON: request tidak valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: token hilang/kedaluwarsa/dicabut (atau kredensial salah)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN: tidak punya hak pada resource ini",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: resource tidak ada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL: kesalahan server (sertakan requestId saat melapor)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Collaborator"
+        ],
+        "summary": "Cabut collaborator / keluar",
+        "description": "Owner mencabut siapa pun; collaborator boleh keluar sendiri (userId = dirinya). Selain itu 403. COLLABORATOR_NOT_FOUND (404) bila bukan anggota.",
+        "operationId": "removeCollaborator",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "ID device."
+            },
+            "required": true,
+            "description": "ID device.",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "ID user collaborator."
+            },
+            "required": true,
+            "description": "ID user collaborator.",
+            "name": "userId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Dicabut"
+          },
+          "401": {
+            "description": "UNAUTHORIZED: token hilang/kedaluwarsa/dicabut (atau kredensial salah)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN: tidak punya hak pada resource ini",
             "content": {
               "application/json": {
                 "schema": {

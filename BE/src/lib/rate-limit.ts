@@ -18,6 +18,9 @@ export const POLICIES = {
   forgotIp: { name: "forgot:ip", limit: 5, windowMs: 15 * 60_000 },
   forgotEmail: { name: "forgot:email", limit: 3, windowMs: 60 * 60_000 },
   resetIp: { name: "reset:ip", limit: 10, windowMs: 15 * 60_000 },
+  // Klaim/registrasi device dan undangan collaborator (per user): mencegah spam device dan enumerasi email
+  claimUser: { name: "claim:user", limit: 20, windowMs: 60 * 60_000 },
+  collabAddUser: { name: "collab-add:user", limit: 30, windowMs: 60 * 60_000 },
   // Dipakai endpoint token mobile (fase B2)
   refreshIp: { name: "refresh:ip", limit: 60, windowMs: 15 * 60_000 },
 } as const satisfies Record<string, RateLimitPolicy>;
