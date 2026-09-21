@@ -314,6 +314,424 @@
         "required": [
           "refreshToken"
         ]
+      },
+      "DeviceListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceListItem"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Kirim sebagai ?cursor= untuk halaman berikutnya; null = habis."
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ]
+      },
+      "DeviceListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "serialNumber": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "Sudah disetujui admin."
+          },
+          "role": {
+            "$ref": "#/components/schemas/DeviceRole"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/DeviceOwner"
+          },
+          "online": {
+            "type": "boolean",
+            "description": "Ada data dalam batas waktu online (default 180 dtk)."
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "example": "2026-09-21T08:15:00.000Z",
+            "description": "Waktu server menerima data terakhir."
+          },
+          "packCount": {
+            "type": "integer"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/DeviceStats"
+          }
+        },
+        "required": [
+          "id",
+          "serialNumber",
+          "name",
+          "verified",
+          "role",
+          "owner",
+          "online",
+          "lastSeenAt",
+          "packCount"
+        ]
+      },
+      "DeviceRole": {
+        "type": "string",
+        "enum": [
+          "owner",
+          "editor",
+          "viewer"
+        ],
+        "description": "Peran user yang sedang login pada device ini."
+      },
+      "DeviceOwner": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "DeviceStats": {
+        "type": "object",
+        "properties": {
+          "packs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PackSummary"
+            }
+          },
+          "maxTemperatureC": {
+            "type": "number",
+            "nullable": true
+          },
+          "maxCellDeltaMv": {
+            "type": "number",
+            "nullable": true
+          },
+          "totalPowerW": {
+            "type": "number",
+            "nullable": true
+          },
+          "minCellVoltageV": {
+            "type": "number",
+            "nullable": true
+          },
+          "maxCellVoltageV": {
+            "type": "number",
+            "nullable": true
+          }
+        },
+        "required": [
+          "packs",
+          "maxTemperatureC",
+          "maxCellDeltaMv",
+          "totalPowerW",
+          "minCellVoltageV",
+          "maxCellVoltageV"
+        ],
+        "description": "Ada bila view=summary."
+      },
+      "PackSummary": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer"
+          },
+          "voltageV": {
+            "type": "number",
+            "nullable": true,
+            "description": "Jumlah tegangan seluruh cell pack (V)."
+          },
+          "currentA": {
+            "type": "number",
+            "nullable": true,
+            "description": "Ampere; NEGATIF = charging, positif = discharging."
+          },
+          "powerW": {
+            "type": "number",
+            "nullable": true
+          },
+          "temperatureC": {
+            "type": "number",
+            "nullable": true,
+            "description": "null = sensor error / tidak ada pembacaan."
+          },
+          "cellDeltaMv": {
+            "type": "number",
+            "nullable": true,
+            "description": "Selisih cell tertinggi − terendah (mV)."
+          },
+          "cellCount": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "index",
+          "voltageV",
+          "currentA",
+          "powerW",
+          "temperatureC",
+          "cellDeltaMv",
+          "cellCount"
+        ]
+      },
+      "DeviceDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "serialNumber": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "Sudah disetujui admin."
+          },
+          "role": {
+            "$ref": "#/components/schemas/DeviceRole"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/DeviceOwner"
+          },
+          "online": {
+            "type": "boolean",
+            "description": "Ada data dalam batas waktu online (default 180 dtk)."
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "example": "2026-09-21T08:15:00.000Z",
+            "description": "Waktu server menerima data terakhir."
+          },
+          "packCount": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-09-21T08:15:00.000Z"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/DeviceStats"
+          },
+          "packs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PackDetail"
+            }
+          },
+          "collaborators": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Collaborator"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "serialNumber",
+          "name",
+          "verified",
+          "role",
+          "owner",
+          "online",
+          "lastSeenAt",
+          "packCount",
+          "createdAt",
+          "summary",
+          "packs",
+          "collaborators"
+        ]
+      },
+      "PackDetail": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer"
+          },
+          "temperatureC": {
+            "type": "number",
+            "nullable": true
+          },
+          "balancerConnected": {
+            "type": "boolean"
+          },
+          "currentA": {
+            "type": "number",
+            "nullable": true
+          },
+          "powerW": {
+            "type": "number",
+            "nullable": true
+          },
+          "voltageV": {
+            "type": "number",
+            "nullable": true
+          },
+          "cellDeltaMv": {
+            "type": "number",
+            "nullable": true
+          },
+          "recordedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "example": "2026-09-21T08:15:00.000Z",
+            "description": "Waktu efektif data (jam device bila wajar, selain itu waktu server)."
+          },
+          "receivedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "example": "2026-09-21T08:15:00.000Z",
+            "description": "Waktu server menerima data."
+          },
+          "cells": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Cell"
+            }
+          }
+        },
+        "required": [
+          "index",
+          "temperatureC",
+          "balancerConnected",
+          "currentA",
+          "powerW",
+          "voltageV",
+          "cellDeltaMv",
+          "recordedAt",
+          "receivedAt",
+          "cells"
+        ]
+      },
+      "Cell": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer"
+          },
+          "voltageV": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "index",
+          "voltageV"
+        ]
+      },
+      "Collaborator": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "nullable": true,
+            "description": "Hanya terisi bila peminta adalah OWNER device; selain itu null."
+          },
+          "role": {
+            "$ref": "#/components/schemas/CollaboratorRole"
+          },
+          "addedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-09-21T08:15:00.000Z"
+          }
+        },
+        "required": [
+          "userId",
+          "name",
+          "email",
+          "role",
+          "addedAt"
+        ]
+      },
+      "CollaboratorRole": {
+        "type": "string",
+        "enum": [
+          "viewer",
+          "editor"
+        ]
+      },
+      "DashboardSummary": {
+        "type": "object",
+        "properties": {
+          "deviceCount": {
+            "type": "integer"
+          },
+          "onlineCount": {
+            "type": "integer"
+          },
+          "offlineCount": {
+            "type": "integer"
+          },
+          "pendingVerificationCount": {
+            "type": "integer"
+          },
+          "totalPowerW": {
+            "type": "number",
+            "nullable": true,
+            "description": "Jumlah daya pack pada device ONLINE; negatif = net charging."
+          },
+          "maxTemperatureC": {
+            "type": "number",
+            "nullable": true
+          },
+          "maxCellDeltaMv": {
+            "type": "number",
+            "nullable": true
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-09-21T08:15:00.000Z"
+          }
+        },
+        "required": [
+          "deviceCount",
+          "onlineCount",
+          "offlineCount",
+          "pendingVerificationCount",
+          "totalPowerW",
+          "maxTemperatureC",
+          "maxCellDeltaMv",
+          "generatedAt"
+        ]
       }
     },
     "parameters": {}
@@ -590,6 +1008,306 @@
         "responses": {
           "204": {
             "description": "Semua sesi dicabut"
+          },
+          "401": {
+            "description": "UNAUTHORIZED: token hilang/kedaluwarsa/dicabut (atau kredensial salah)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL: kesalahan server (sertakan requestId saat melapor)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "tags": [
+          "Akun"
+        ],
+        "summary": "Profil user saat ini",
+        "operationId": "getMe",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Profil",
+            "headers": {
+              "ETag": {
+                "description": "Validator. Kirim balik sebagai If-None-Match pada permintaan berikutnya.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Tidak berubah sejak ETag pada If-None-Match; tidak ada body. Pakai salinan lokal."
+          },
+          "401": {
+            "description": "UNAUTHORIZED: token hilang/kedaluwarsa/dicabut (atau kredensial salah)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL: kesalahan server (sertakan requestId saat melapor)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/devices": {
+      "get": {
+        "tags": [
+          "Device"
+        ],
+        "summary": "Daftar device",
+        "description": "Device yang bisa diakses (owner atau collaborator), terbaru dulu, cursor pagination (`nextCursor` -> `?cursor=`). `view=summary` (default) menyertakan ringkasan telemetri per pack (tegangan, arus, daya, suhu, delta cell). `online`: ada data dalam 180 detik terakhir. Mendukung ETag/If-None-Match.",
+        "operationId": "listDevices",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "basic",
+                "summary"
+              ],
+              "default": "summary",
+              "description": "`summary` menyertakan ringkasan telemetri per device."
+            },
+            "required": false,
+            "description": "`summary` menyertakan ringkasan telemetri per device.",
+            "name": "view",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Satu halaman device",
+            "headers": {
+              "ETag": {
+                "description": "Validator. Kirim balik sebagai If-None-Match pada permintaan berikutnya.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceListResponse"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Tidak berubah sejak ETag pada If-None-Match; tidak ada body. Pakai salinan lokal."
+          },
+          "400": {
+            "description": "VALIDATION_ERROR / INVALID_JSON: request tidak valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: token hilang/kedaluwarsa/dicabut (atau kredensial salah)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL: kesalahan server (sertakan requestId saat melapor)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}": {
+      "get": {
+        "tags": [
+          "Device"
+        ],
+        "summary": "Detail device (snapshot)",
+        "description": "Snapshot terbaru semua pack dan cell + ringkasan + collaborator. Email collaborator hanya terlihat oleh OWNER. User yang bukan anggota device mendapat 404 (bukan 403). Mendukung ETag/If-None-Match.",
+        "operationId": "getDevice",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "ID device (bukan serialNumber)."
+            },
+            "required": true,
+            "description": "ID device (bukan serialNumber).",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detail device",
+            "headers": {
+              "ETag": {
+                "description": "Validator. Kirim balik sebagai If-None-Match pada permintaan berikutnya.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceDetail"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Tidak berubah sejak ETag pada If-None-Match; tidak ada body. Pakai salinan lokal."
+          },
+          "401": {
+            "description": "UNAUTHORIZED: token hilang/kedaluwarsa/dicabut (atau kredensial salah)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: resource tidak ada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL: kesalahan server (sertakan requestId saat melapor)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dashboard/summary": {
+      "get": {
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Ringkasan lintas device",
+        "description": "Jumlah device (online/offline/menunggu verifikasi), total daya, suhu maksimum, delta cell maksimum — dihitung dari device ONLINE saja. Tanpa SoC/SoH. Mendukung ETag/If-None-Match (generatedAt tidak ikut hash).",
+        "operationId": "getDashboardSummary",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ringkasan",
+            "headers": {
+              "ETag": {
+                "description": "Validator. Kirim balik sebagai If-None-Match pada permintaan berikutnya.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardSummary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Tidak berubah sejak ETag pada If-None-Match; tidak ada body. Pakai salinan lokal."
           },
           "401": {
             "description": "UNAUTHORIZED: token hilang/kedaluwarsa/dicabut (atau kredensial salah)",

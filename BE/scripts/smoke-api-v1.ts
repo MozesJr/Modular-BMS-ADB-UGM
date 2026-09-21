@@ -4,9 +4,11 @@
  * Bagian: auth token (B2) · me/devices/dashboard (B3) · history (B4) · collaborator & manajemen device (B5).
  */
 import { PrismaClient } from "@prisma/client";
-import { createUser, makeClient, Reporter, requireTestDb, spawnServer, waitHealth, serverEnv, SMOKE_NEXTAUTH_SECRET } from "./_smoke-lib";
+import { createUser, makeClient, Reporter, requireTestDb, seedDevice, spawnServer, waitHealth, serverEnv, SMOKE_NEXTAUTH_SECRET } from "./_smoke-lib";
 import { spawnSync } from "node:child_process";
-import { TokenResponseSchema, ErrorResponseSchema } from "../src/contracts/schemas";
+import {
+  TokenResponseSchema, ErrorResponseSchema, MeSchema, DeviceListResponseSchema, DeviceDetailSchema, DashboardSummarySchema,
+} from "../src/contracts/schemas";
 import { SignJWT } from "jose";
 
 const dbUrl = requireTestDb();
@@ -87,12 +89,106 @@ async function authSection() {
   R.ok("refresh dibatasi (60/15 menit per IP) -> 429", rl?.status === 429, String(rl?.status));
 }
 
+async function loginToken(email: string, ip: string): Promise<string> {
+  const r = await call("POST", "/api/v1/auth/login", { body: { email, password: PW }, ip });
+  return r.json.accessToken as string;
+}
+
+async function readSection() {
+  const owner = await createUser(prisma, `own${tag}@smoke.test`, PW, { name: "Pemilik" });
+  const viewer = await createUser(prisma, `view${tag}@smoke.test`, PW, { name: "Pelihat" });
+  const stranger = await createUser(prisma, `str${tag}@smoke.test`, PW);
+  const now = new Date();
+
+  // 3 device milik owner: A online (2 pack), B offline (data 1 jam lalu), C tanpa data; collaborator viewer di A
+  const A = await seedDevice(prisma, { serial: `SM-A-${tag}`, ownerId: owner.id, name: "Rak A", receivedAt: now, packs: [
+    { index: 0, temperature: 27.5, current: -2.5, power: -120, cells: [3.30, 3.32, 3.31, 3.29] },
+    { index: 1, temperature: null, current: 1.0, power: 50, cells: [3.20, 3.25] },
+  ] });
+  await new Promise((r) => setTimeout(r, 15));
+  const B = await seedDevice(prisma, { serial: `SM-B-${tag}`, ownerId: owner.id, name: "Rak B", receivedAt: new Date(now.getTime() - 3600_000), packs: [{ index: 0, temperature: 30, power: 10, cells: [3.3, 3.3] }] });
+  await new Promise((r) => setTimeout(r, 15));
+  const C = await seedDevice(prisma, { serial: `SM-C-${tag}`, ownerId: owner.id, verified: false, receivedAt: now, packs: [] });
+  await prisma.deviceCollaborator.create({ data: { deviceId: A.id, userId: viewer.id, role: "viewer" } });
+
+  const ot = await loginToken(owner.email, "10.3.0.1");
+  const vt = await loginToken(viewer.email, "10.3.0.2");
+  const st = await loginToken(stranger.email, "10.3.0.3");
+
+  // /me
+  const me = await call("GET", "/api/v1/me", { token: ot });
+  R.ok("GET /me -> 200", me.status === 200);
+  R.schema("respons /me", MeSchema, me.json);
+  R.ok("/me tanpa token -> 401", (await call("GET", "/api/v1/me")).status === 401);
+
+  // list
+  const list = await call("GET", "/api/v1/devices", { token: ot });
+  const l = R.schema("daftar device (view=summary)", DeviceListResponseSchema, list.json);
+  R.ok("owner melihat 3 device, terbaru dulu (C, B, A)", l?.items.map((d) => d.serialNumber).join() === `SM-C-${tag},SM-B-${tag},SM-A-${tag}`, JSON.stringify(l?.items.map((d) => d.serialNumber)));
+  const a = l?.items.find((d) => d.id === A.id);
+  R.ok("device A: online, role owner, packCount 2, lastSeenAt terisi", a?.online === true && a.role === "owner" && a.packCount === 2 && !!a.lastSeenAt);
+  R.ok("device B (data 1 jam lalu): offline", l?.items.find((d) => d.id === B.id)?.online === false);
+  R.ok("device C (tanpa data): offline, lastSeenAt null, summary kosong", (() => { const c = l?.items.find((d) => d.id === C.id); return c?.online === false && c.lastSeenAt === null && c.summary?.packs.length === 0; })());
+  const p0 = a?.summary?.packs.find((p) => p.index === 0);
+  R.ok("ringkasan pack 0: tegangan 13.22 V, delta 30 mV, arus -2.5 A, daya -120 W, suhu 27.5", p0?.voltageV === 13.22 && p0.cellDeltaMv === 30 && p0.currentA === -2.5 && p0.powerW === -120 && p0.temperatureC === 27.5, JSON.stringify(p0));
+  R.ok("pack 1: suhu null (sensor error) tetap null, bukan 0", a?.summary?.packs.find((p) => p.index === 1)?.temperatureC === null);
+  R.ok("ringkasan device: suhu maks 27.5, daya total -70, delta maks 50", a?.summary?.maxTemperatureC === 27.5 && a.summary.totalPowerW === -70 && a.summary.maxCellDeltaMv === 50, JSON.stringify(a?.summary));
+  R.ok("respons tidak memuat SoC/SoH", !/soc|soh|stateOf/i.test(JSON.stringify(list.json)));
+
+  const basic = await call("GET", "/api/v1/devices?view=basic", { token: ot });
+  R.ok("view=basic tanpa summary", basic.status === 200 && basic.json.items.every((d: any) => d.summary === undefined) && basic.json.items.length === 3);
+
+  // pagination
+  const p1 = await call("GET", "/api/v1/devices?limit=2", { token: ot });
+  R.ok("limit=2 -> 2 item + nextCursor", p1.json.items.length === 2 && typeof p1.json.nextCursor === "string");
+  const p2 = await call("GET", `/api/v1/devices?limit=2&cursor=${encodeURIComponent(p1.json.nextCursor)}`, { token: ot });
+  R.ok("halaman 2 -> sisa 1 item, nextCursor null, tanpa duplikat", p2.json.items.length === 1 && p2.json.nextCursor === null && ![...p1.json.items].some((x: any) => x.id === p2.json.items[0].id));
+  R.ok("cursor rusak -> 400 INVALID_CURSOR", (await call("GET", "/api/v1/devices?cursor=ngawur", { token: ot })).json?.error?.code === "INVALID_CURSOR");
+  R.ok("limit di luar batas -> 400", (await call("GET", "/api/v1/devices?limit=1000", { token: ot })).status === 400);
+
+  // akses
+  const vList = await call("GET", "/api/v1/devices", { token: vt });
+  R.ok("viewer hanya melihat device A dengan role viewer", vList.json.items.length === 1 && vList.json.items[0].id === A.id && vList.json.items[0].role === "viewer");
+  R.ok("orang asing: daftar kosong", (await call("GET", "/api/v1/devices", { token: st })).json.items.length === 0);
+
+  // detail
+  const det = await call("GET", `/api/v1/devices/${A.id}`, { token: ot });
+  const dd = R.schema("detail device", DeviceDetailSchema, det.json);
+  R.ok("detail: 2 pack, cell terurut & bersatuan V, collaborator terlihat oleh owner DENGAN email", dd?.packs.length === 2 && dd.packs[0].cells[0].voltageV === 3.3 && dd.collaborators.length === 1 && dd.collaborators[0].email === viewer.email);
+  const vdet = await call("GET", `/api/v1/devices/${A.id}`, { token: vt });
+  R.ok("detail oleh viewer: 200, role viewer, EMAIL collaborator disembunyikan (null)", vdet.status === 200 && vdet.json.role === "viewer" && vdet.json.collaborators.every((c: any) => c.email === null) && !JSON.stringify(vdet.json).includes(viewer.email));
+  const sdet = await call("GET", `/api/v1/devices/${A.id}`, { token: st });
+  R.ok("orang asing -> 404 DEVICE_NOT_FOUND (bukan 403: keberadaan tidak bocor)", sdet.status === 404 && sdet.json?.error?.code === "DEVICE_NOT_FOUND");
+  R.ok("id tidak ada -> 404 dengan respons identik", (await call("GET", "/api/v1/devices/tidak-ada", { token: ot })).json?.error?.message === sdet.json?.error?.message);
+  R.ok("viewer tidak melihat device B milik owner (404)", (await call("GET", `/api/v1/devices/${B.id}`, { token: vt })).status === 404);
+
+  // ETag
+  const etag = det.res.headers.get("etag")!;
+  R.ok("detail membawa ETag + Cache-Control private,no-cache", !!etag && det.res.headers.get("cache-control") === "private, no-cache");
+  const nm = await call("GET", `/api/v1/devices/${A.id}`, { token: ot, headers: { "if-none-match": etag } });
+  R.ok("If-None-Match sama -> 304 tanpa body", nm.status === 304 && nm.json === null);
+  await prisma.pack.updateMany({ where: { deviceId: A.id, index: 0 }, data: { temperature: 28.1 } });
+  R.ok("data berubah -> 200 dengan ETag baru", (await call("GET", `/api/v1/devices/${A.id}`, { token: ot, headers: { "if-none-match": etag } })).status === 200);
+
+  // dashboard
+  const dash = await call("GET", "/api/v1/dashboard/summary", { token: ot });
+  const ds = R.schema("dashboard summary", DashboardSummarySchema, dash.json);
+  R.ok("dashboard: 3 device, 1 online (A), 2 offline, 1 menunggu verifikasi (C)", ds?.deviceCount === 3 && ds.onlineCount === 1 && ds.offlineCount === 2 && ds.pendingVerificationCount === 1, JSON.stringify(ds));
+  R.ok("dashboard: daya total hanya dari device online (-70), suhu maks 28.1, delta maks 50", ds?.totalPowerW === -70 && ds.maxTemperatureC === 28.1 && ds.maxCellDeltaMv === 50, JSON.stringify(ds));
+  const dashNm = await call("GET", "/api/v1/dashboard/summary", { token: ot, headers: { "if-none-match": dash.res.headers.get("etag")! } });
+  R.ok("dashboard: If-None-Match -> 304 walau generatedAt berbeda", dashNm.status === 304);
+  const empty = await call("GET", "/api/v1/dashboard/summary", { token: st });
+  R.ok("dashboard user tanpa device: nol dan null (bukan 0)", empty.json.deviceCount === 0 && empty.json.totalPowerW === null && empty.json.maxTemperatureC === null);
+  return { owner, viewer, stranger, A, B, C, ot, vt, st };
+}
+
 async function main() {
   let server: ReturnType<typeof spawnServer> | null = null;
   if (!process.env.SMOKE_BASE_URL) server = spawnServer(dbUrl, PORT);
   try {
     R.ok("server sehat (/api/health 200)", await waitHealth(BASE));
     await authSection();
+    await readSection();
 
     // fail-fast: server menolak start tanpa JWT_ACCESS_SECRET (dijalankan terpisah, port lain)
     const bad = spawnSync("npx", ["tsx", "src/server.ts"], {

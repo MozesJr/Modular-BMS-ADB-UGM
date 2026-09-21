@@ -1,9 +1,14 @@
 import "./openapi-setup";
 import { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 import {
+  DashboardSummarySchema,
+  DeviceDetailSchema,
+  DeviceListResponseSchema,
+  DevicesQuerySchema,
   ErrorResponseSchema,
   HealthResponseSchema,
+  MeSchema,
   LoginRequestSchema,
   LogoutRequestSchema,
   RefreshRequestSchema,
@@ -51,7 +56,12 @@ export interface EndpointDef {
   success: { status: number; description: string; schema?: ZodType };
   errors?: number[]; // kode error yang mungkin; 500 selalu ditambahkan
   headers?: Record<string, { description: string }>;
+  notModified?: boolean; // dokumentasikan 304 (ETag / If-None-Match)
 }
+
+const ETAG_HEADER = { ETag: { description: "Validator. Kirim balik sebagai If-None-Match pada permintaan berikutnya." } };
+
+const IdParam = z.object({ id: z.string().openapi({ description: "ID device (bukan serialNumber)." }) });
 
 export function endpoint(def: EndpointDef) {
   const errors = Array.from(new Set([...(def.errors ?? []), 500])).sort();
@@ -62,6 +72,9 @@ export function endpoint(def: EndpointDef) {
       ...(def.success.schema ? { content: { "application/json": { schema: def.success.schema } } } : {}),
     },
   };
+  if (def.notModified) {
+    responses["304"] = { description: "Tidak berubah sejak ETag pada If-None-Match; tidak ada body. Pakai salinan lokal." };
+  }
   for (const status of errors) {
     responses[String(status)] = {
       description: ERROR_DESCRIPTIONS[status] ?? "Error",
@@ -161,4 +174,67 @@ endpoint({
   operationId: "logoutAll",
   success: { status: 204, description: "Semua sesi dicabut" },
   errors: [401],
+});
+
+// ---------------------------------------------------------------------------------------------
+// Akun, device, dashboard (B3)
+// ---------------------------------------------------------------------------------------------
+endpoint({
+  method: "get",
+  path: "/api/v1/me",
+  tag: "Akun",
+  summary: "Profil user saat ini",
+  operationId: "getMe",
+  success: { status: 200, description: "Profil", schema: MeSchema },
+  errors: [401],
+  headers: ETAG_HEADER,
+  notModified: true,
+});
+
+endpoint({
+  method: "get",
+  path: "/api/v1/devices",
+  tag: "Device",
+  summary: "Daftar device",
+  description:
+    "Device yang bisa diakses (owner atau collaborator), terbaru dulu, cursor pagination (`nextCursor` -> `?cursor=`). " +
+    "`view=summary` (default) menyertakan ringkasan telemetri per pack (tegangan, arus, daya, suhu, delta cell). " +
+    "`online`: ada data dalam 180 detik terakhir. Mendukung ETag/If-None-Match.",
+  operationId: "listDevices",
+  query: DevicesQuerySchema,
+  success: { status: 200, description: "Satu halaman device", schema: DeviceListResponseSchema },
+  errors: [400, 401],
+  headers: ETAG_HEADER,
+  notModified: true,
+});
+
+endpoint({
+  method: "get",
+  path: "/api/v1/devices/{id}",
+  tag: "Device",
+  summary: "Detail device (snapshot)",
+  description:
+    "Snapshot terbaru semua pack dan cell + ringkasan + collaborator. Email collaborator hanya terlihat oleh OWNER. " +
+    "User yang bukan anggota device mendapat 404 (bukan 403). Mendukung ETag/If-None-Match.",
+  operationId: "getDevice",
+  params: IdParam,
+  success: { status: 200, description: "Detail device", schema: DeviceDetailSchema },
+  errors: [401, 404],
+  headers: ETAG_HEADER,
+  notModified: true,
+});
+
+endpoint({
+  method: "get",
+  path: "/api/v1/dashboard/summary",
+  tag: "Dashboard",
+  summary: "Ringkasan lintas device",
+  description:
+    "Jumlah device (online/offline/menunggu verifikasi), total daya, suhu maksimum, delta cell maksimum — dihitung dari device ONLINE saja. " +
+    "Tanpa SoC/SoH. Mendukung ETag/If-None-Match (generatedAt tidak ikut hash).",
+  operationId: "getDashboardSummary",
+  success: { status: 200, description: "Ringkasan", schema: DashboardSummarySchema },
+  errors: [401],
+  headers: ETAG_HEADER,
+  notModified: true,
 });

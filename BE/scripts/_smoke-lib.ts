@@ -99,3 +99,37 @@ export async function createUser(prisma: PrismaClient, email: string, password: 
     data: { email, name: email.split("@")[0], passwordHash: await bcrypt.hash(password, 4), ...over },
   });
 }
+
+export interface SeedPack {
+  index: number;
+  temperature: number | null;
+  current?: number | null;
+  power?: number | null;
+  cells: number[];
+}
+
+// Menyemai device + state terbaru langsung ke DB sekali-pakai (meniru hasil ingestion MQTT).
+export async function seedDevice(
+  prisma: PrismaClient,
+  o: { serial: string; ownerId: string | null; name?: string; verified?: boolean; receivedAt: Date; packs: SeedPack[] },
+) {
+  const device = await prisma.device.create({
+    data: { serialNumber: o.serial, name: o.name ?? null, ownerId: o.ownerId, verified: o.verified ?? true },
+  });
+  for (const p of o.packs) {
+    await prisma.pack.create({
+      data: {
+        deviceId: device.id,
+        index: p.index,
+        temperature: p.temperature,
+        current: p.current ?? null,
+        power: p.power ?? null,
+        balancerConnected: true,
+        recordedAt: o.receivedAt,
+        receivedAt: o.receivedAt,
+        cells: { create: p.cells.map((v, i) => ({ index: i, voltage: v })) },
+      },
+    });
+  }
+  return device;
+}
