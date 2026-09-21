@@ -1,4 +1,6 @@
 import json
+import os
+import sys
 import time
 import random
 import paho.mqtt.client as mqtt
@@ -7,13 +9,19 @@ import paho.mqtt.client as mqtt
 # KONFIGURASI MQTT
 # =========================================================
 
-BROKER = "72.61.208.150"
-PORT = 1883
+# Host broker, kredensial, dan device id dibaca dari environment (TIDAK ada nilai di repo).
+#   MQTT_BROKER_HOST (default 127.0.0.1)  MQTT_BROKER_PORT (default 1883)
+#   MQTT_USERNAME    (default esp32_device: ACL hanya mengizinkan akun ini MENERBITKAN bms/+/data)
+#   MQTT_PASSWORD    (WAJIB)              DEVICE_ID (default GAMA-BMS-PACK-001)
+BROKER = os.environ.get("MQTT_BROKER_HOST", "127.0.0.1")
+PORT = int(os.environ.get("MQTT_BROKER_PORT", "1883"))
 
-USERNAME = "backend_service"
-PASSWORD = "BmsAdbUgm2026#"
+USERNAME = os.environ.get("MQTT_USERNAME", "esp32_device")
+PASSWORD = os.environ.get("MQTT_PASSWORD")
+if not PASSWORD:
+    sys.exit("MQTT_PASSWORD wajib diisi lewat environment (jangan hardcode di file ini)")
 
-DEVICE_ID = "GAMA-BMS-PACK-001"
+DEVICE_ID = os.environ.get("DEVICE_ID", "GAMA-BMS-PACK-001")
 
 TOPIC = f"bms/{DEVICE_ID}/data"
 

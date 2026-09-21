@@ -94,11 +94,23 @@ Keputusan: **jam device tidak dipercaya penuh** (belum dipastikan firmware sinkr
 | Backpressure | Antrean bounded per device; bila penuh, pesan paling lama dibuang dan dihitung `mqtt.dropped`. |
 | Laju yang disarankan | ≥ 1 pesan/detik per device masih aman; default simulator 1 pesan/60 detik. |
 
-## 5. Autentikasi & otorisasi broker
+## 5. Autentikasi, otorisasi & jaringan broker
 
-Saat ini satu akun bersama; **rencana**: user per device (`username = device_id`) + `acl_file`
-(`pattern write bms/%u/#`) dan user `backend` read-only `bms/#`, TLS di port 8883. Perubahan ini butuh provisioning kredensial
-per unit di firmware (NVS). Akan dikerjakan bersama perbaikan `MQTT/` (F-05/F-25).
+Detail operasional: [`MQTT/README.md`](../MQTT/README.md). Ringkasan yang mempengaruhi firmware:
+
+| Aspek | Aturan |
+|---|---|
+| Akses | Wajib username+password (`allow_anonymous false`). Akun perangkat bersama: `esp32_device`. |
+| ACL (peran) | `esp32_device`: **hanya menulis** `bms/+/data` dan `bms/+/status`, tidak boleh membaca. `backend_service`: hanya membaca `bms/#`. Selain itu ditolak. |
+| Client-id | **Wajib tidak kosong** (klien MQTT v5 tanpa `-i` mengirim id kosong dan ditolak). |
+| Keepalive | **≤ 300 detik** (MQTT 3.1.1 dengan nilai lebih besar ditolak). Umum 15–60 dtk. |
+| Ukuran pesan | ≤ 65.536 byte (broker membuang yang lebih besar; sama dengan batas backend). |
+| Jaringan | Broker hanya di network internal Docker secara default. **Keputusan proyek:** ESP32 memakai **port publik 1883 + ACL, sementara** (override `MQTT/docker-compose.public.yml`), **tanpa TLS** (kredensial dan payload cleartext). Cloudflare Tunnel tidak bisa untuk ESP32. |
+| Auto-provision | Dibatasi backend (`PROVISION_MAX_PER_HOUR`, lihat §4). |
+
+**Tahap berikutnya (belum aktif):** user per device (`username = device_id`) dengan ACL `pattern write bms/%u/...`
+(`MQTT/config/acl_file.per-device.example`, `MQTT/scripts/add-device-user.sh`) — butuh provisioning kredensial unik per unit
+di firmware (NVS); lalu TLS 8883 dengan domain DNS-only dan `WiFiClientSecure`.
 
 ## 6. Rencana perubahan kontrak (belum aktif)
 
@@ -106,7 +118,7 @@ per unit di firmware (NVS). Akan dikerjakan bersama perbaikan `MQTT/` (F-05/F-25
 |---|---|
 | Topik `bms/{id}/status` retained + LWT `offline` (payload `{"state":"online"\|"offline"}`) | **firmware + mqtt + backend + mobile/FE** (indikator online/offline akurat) |
 | Field opsional `seq` (integer naik monoton per boot) | firmware + backend (dedupe andal saat jam menyimpang) |
-| Kredensial per device + ACL + TLS | firmware + mqtt + backend |
+| Kredensial per device (ACL `%u`) lalu TLS 8883 | firmware (NVS + `WiFiClientSecure`) + mqtt + backend |
 
 ## 7. Ringkasan dampak perubahan pada Fase A
 
@@ -116,3 +128,4 @@ per unit di firmware (NVS). Akan dikerjakan bersama perbaikan `MQTT/` (F-05/F-25
 | `temperature` boleh `null`; suhu di luar rentang → `null` (bukan tolak pesan) — **M0** | Boleh kirim `null` saat sensor terlepas; tidak wajib | ya | FE/mobile: tampilkan "sensor error"/"–" bila `null` (API: `temperature: number \| null`) |
 | Semantik `timestamp` (§3) | Disarankan NTP | ya | Waktu ISO-8601 UTC dari API |
 | Batas 64 KiB / 16 pack / 64 cell | **Cek** | ya | — |
+| ACL peran + client-id wajib + keepalive ≤ 300 dtk + batas auto-provision — **Fase M** | **Cek**: client-id tidak kosong, keepalive ≤ 300, publish hanya ke `bms/{id}/data\|status` | ya (`PROVISION_MAX_PER_HOUR`) | — |
