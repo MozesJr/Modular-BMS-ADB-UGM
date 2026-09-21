@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/authz";
+import { err, parseJson, route } from "@/lib/http";
+import { emailSchema, expiresAtSchema, nameSchema, newPasswordSchema, roleSchema } from "@/contracts/common";
 
-export async function GET() {
-  const session = await requireAdmin();
-  if (!session) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+export const GET = route(async () => {
+  await requireAdmin();
 
   const users = await prisma.user.findMany({
     select: {
@@ -21,37 +23,28 @@ export async function GET() {
   });
 
   return NextResponse.json(users);
-}
+});
 
-export async function POST(req: Request) {
-  const session = await requireAdmin();
-  if (!session) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+const createUserBody = z.object({
+  name: nameSchema.optional(),
+  email: emailSchema,
+  password: newPasswordSchema,
+  role: roleSchema.optional(),
+  expiresAt: expiresAtSchema.optional(),
+});
 
-  const { name, email, password, role, expiresAt } = await req.json();
-
-  if (!email || !password || password.length < 8) {
-    return NextResponse.json(
-      { error: "Email & password (min 8 karakter) wajib diisi" },
-      { status: 400 }
-    );
-  }
+export const POST = route(async (req) => {
+  await requireAdmin();
+  const { name, email, password, role, expiresAt } = await parseJson(req, createUserBody);
 
   const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
-    return NextResponse.json({ error: "Email sudah terdaftar" }, { status: 409 });
-  }
+  if (existing) throw err.conflict("Email sudah terdaftar", "EMAIL_TAKEN");
 
   const passwordHash = await bcrypt.hash(password, 12);
   const user = await prisma.user.create({
-    data: {
-      name,
-      email,
-      passwordHash,
-      role: role === "ADMIN" ? "ADMIN" : "USER",
-      expiresAt: expiresAt ? new Date(expiresAt) : null,
-    },
+    data: { name, email, passwordHash, role: role ?? "USER", expiresAt: expiresAt ?? null },
     select: { id: true, name: true, email: true, role: true, expiresAt: true },
   });
 
   return NextResponse.json(user, { status: 201 });
-}
+});

@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
 import type { Role } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { err } from "@/lib/http";
 import { roleOf } from "@/lib/device-role";
+import { checkSessionAgainstUser } from "@/lib/session-check";
 import type { DeviceRole } from "@/lib/device-role";
 
 // JWT session (no PrismaAdapter) tidak pernah di-invalidate otomatis. Karena itu SETIAP request
@@ -31,9 +32,9 @@ async function getValidSession(): Promise<AuthSession | null> {
     where: { id: sessionUser.id },
     select: { id: true, role: true, expiresAt: true, tokenVersion: true, name: true, email: true },
   });
-  if (!user) return null;
-  if (user.expiresAt && user.expiresAt.getTime() <= Date.now()) return null;
-  if ((sessionUser.tokenVersion ?? 0) !== user.tokenVersion) return null;
+  if (!checkSessionAgainstUser({ id: sessionUser.id, tokenVersion: sessionUser.tokenVersion }, user).ok || !user) {
+    return null;
+  }
 
   return {
     user: {
@@ -47,13 +48,17 @@ async function getValidSession(): Promise<AuthSession | null> {
   };
 }
 
-export async function requireAuth() {
-  return getValidSession();
+// Melempar ApiError 401 bila tidak login/sesi tidak berlaku (ditangkap oleh route()).
+export async function requireAuth(): Promise<AuthSession> {
+  const session = await getValidSession();
+  if (!session) throw err.unauthorized();
+  return session;
 }
 
-export async function requireAdmin() {
-  const session = await getValidSession();
-  if (!session || session.user.role !== "ADMIN") return null;
+// 401 bila belum login, 403 bila login tapi bukan ADMIN.
+export async function requireAdmin(): Promise<AuthSession> {
+  const session = await requireAuth();
+  if (session.user.role !== "ADMIN") throw err.forbidden("Hanya admin yang boleh mengakses ini");
   return session;
 }
 
@@ -64,9 +69,10 @@ export async function requireAdmin() {
 export { roleOf } from "@/lib/device-role";
 export type { DeviceRole } from "@/lib/device-role";
 
-export type DeviceAccess =
-  | { ok: true; role: DeviceRole; device: { id: string; ownerId: string | null } }
-  | { ok: false; response: NextResponse };
+export type DeviceAccess = {
+  role: DeviceRole;
+  device: { id: string; ownerId: string | null };
+};
 
 async function loadAccess(deviceId: string, userId: string) {
   const device = await prisma.device.findUnique({
@@ -77,34 +83,24 @@ async function loadAccess(deviceId: string, userId: string) {
       collaborators: { where: { userId }, select: { userId: true, role: true } },
     },
   });
-  if (!device) return { notFound: true as const };
-  return { notFound: false as const, device, role: roleOf(device, userId) };
+  if (!device) throw err.notFound("Device tidak ditemukan", "DEVICE_NOT_FOUND");
+  return { device, role: roleOf(device, userId) };
 }
 
-// Owner, editor, atau viewer boleh melihat.
+// Owner, editor, atau viewer boleh melihat. Melempar 404 (device tidak ada) / 403 (bukan anggota).
 export async function assertCanView(deviceId: string, userId: string): Promise<DeviceAccess> {
-  const access = await loadAccess(deviceId, userId);
-  if (access.notFound) {
-    return { ok: false, response: NextResponse.json({ error: "Device tidak ditemukan" }, { status: 404 }) };
-  }
-  if (!access.role) {
-    return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
-  }
-  return { ok: true, role: access.role, device: { id: access.device.id, ownerId: access.device.ownerId } };
+  const { device, role } = await loadAccess(deviceId, userId);
+  if (!role) throw err.forbidden();
+  return { role, device: { id: device.id, ownerId: device.ownerId } };
 }
 
-// Hanya owner.
+// Hanya owner. Melempar 404 / 403.
 export async function assertOwner(
   deviceId: string,
   userId: string,
   forbiddenMessage = "Hanya owner device yang bisa melakukan ini",
 ): Promise<DeviceAccess> {
-  const access = await loadAccess(deviceId, userId);
-  if (access.notFound) {
-    return { ok: false, response: NextResponse.json({ error: "Device tidak ditemukan" }, { status: 404 }) };
-  }
-  if (access.role !== "owner") {
-    return { ok: false, response: NextResponse.json({ error: forbiddenMessage }, { status: 403 }) };
-  }
-  return { ok: true, role: "owner", device: { id: access.device.id, ownerId: access.device.ownerId } };
+  const { device, role } = await loadAccess(deviceId, userId);
+  if (role !== "owner") throw err.forbidden(forbiddenMessage);
+  return { role, device: { id: device.id, ownerId: device.ownerId } };
 }

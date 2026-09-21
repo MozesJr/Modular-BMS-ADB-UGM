@@ -1,78 +1,68 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { assertCanView, assertOwner, requireAuth } from "@/lib/authz";
+import { err, parseJson, parseQuery, route } from "@/lib/http";
+import { collaboratorRoleSchema, emailSchema } from "@/contracts/common";
 
-export async function GET(
-  _req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+type Ctx = { params: Promise<{ id: string }> };
+
+const userSelect = { id: true, name: true, email: true } as const;
+
+export const GET = route<Ctx>(async (_req, { params }) => {
   const session = await requireAuth();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
   const { id } = await params;
-  // Sebelumnya hanya cek "sudah login" -> user mana pun bisa membaca collaborator device lain (IDOR).
-  const access = await assertCanView(id, session.user.id);
-  if (!access.ok) return access.response;
+  // Hanya anggota device (owner/collaborator) yang boleh melihat daftar collaborator.
+  await assertCanView(id, session.user.id);
 
   const collaborators = await prisma.deviceCollaborator.findMany({
     where: { deviceId: id },
-    include: { user: { select: { id: true, name: true, email: true } } },
+    include: { user: { select: userSelect } },
   });
-
   return NextResponse.json(collaborators);
-}
+});
+
+const inviteBody = z.object({
+  email: emailSchema,
+  role: collaboratorRoleSchema.optional(),
+});
 
 // POST: owner undang user lain lewat email jadi collaborator
-export async function POST(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export const POST = route<Ctx>(async (req, { params }) => {
   const session = await requireAuth();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
   const { id } = await params;
-  const ownerCheck = await assertOwner(id, session.user.id, "Hanya owner device yang bisa menambah collaborator");
-  if (!ownerCheck.ok) return ownerCheck.response;
+  await assertOwner(id, session.user.id, "Hanya owner device yang bisa menambah collaborator");
 
-  const { email, role } = await req.json();
-  if (!email) return NextResponse.json({ error: "Email wajib diisi" }, { status: 400 });
+  const { email, role } = await parseJson(req, inviteBody);
 
   const targetUser = await prisma.user.findUnique({ where: { email } });
-  if (!targetUser) {
-    return NextResponse.json({ error: "User dengan email tersebut tidak ditemukan" }, { status: 404 });
-  }
-  if (targetUser.id === session.user.id) {
-    return NextResponse.json({ error: "Tidak bisa menambahkan diri sendiri" }, { status: 400 });
-  }
+  if (!targetUser) throw err.notFound("User dengan email tersebut tidak ditemukan", "USER_NOT_FOUND");
+  if (targetUser.id === session.user.id) throw err.badRequest("Tidak bisa menambahkan diri sendiri");
 
-  const collaborator = await prisma.deviceCollaborator.create({
-    data: {
-      deviceId: id,
-      userId: targetUser.id,
-      role: role === "editor" ? "editor" : "viewer",
-    },
-    include: { user: { select: { id: true, name: true, email: true } } },
-  });
+  try {
+    const collaborator = await prisma.deviceCollaborator.create({
+      data: { deviceId: id, userId: targetUser.id, role: role ?? "viewer" },
+      include: { user: { select: userSelect } },
+    });
+    return NextResponse.json(collaborator, { status: 201 });
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      throw err.conflict("User sudah menjadi collaborator device ini", "ALREADY_COLLABORATOR");
+    }
+    throw e;
+  }
+});
 
-  return NextResponse.json(collaborator, { status: 201 });
-}
+const removeQuery = z.object({ userId: z.string().min(1, "userId wajib diisi") });
 
 // DELETE: owner cabut akses collaborator — ?userId=xxx
-export async function DELETE(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export const DELETE = route<Ctx>(async (req, { params }) => {
   const session = await requireAuth();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
   const { id } = await params;
-  const ownerCheck = await assertOwner(id, session.user.id, "Hanya owner device yang bisa menghapus collaborator");
-  if (!ownerCheck.ok) return ownerCheck.response;
+  await assertOwner(id, session.user.id, "Hanya owner device yang bisa menghapus collaborator");
 
-  const { searchParams } = new URL(req.url);
-  const userId = searchParams.get("userId");
-  if (!userId) return NextResponse.json({ error: "userId wajib diisi" }, { status: 400 });
-
+  const { userId } = parseQuery(req, removeQuery);
   await prisma.deviceCollaborator.deleteMany({ where: { deviceId: id, userId } });
   return NextResponse.json({ message: "Collaborator dihapus" });
-}
+});

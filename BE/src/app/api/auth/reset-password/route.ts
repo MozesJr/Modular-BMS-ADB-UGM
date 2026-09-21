@@ -1,26 +1,24 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { ApiError, parseJson, route } from "@/lib/http";
+import { newPasswordSchema } from "@/contracts/common";
 
-export async function POST(req: Request) {
-  const { token, newPassword } = await req.json();
+const resetBody = z.object({
+  token: z.string().min(1, "Token wajib diisi").max(256),
+  newPassword: newPasswordSchema,
+});
 
-  if (!token || !newPassword || newPassword.length < 8) {
-    return NextResponse.json(
-      { error: "Token & password baru (min 8 karakter) wajib diisi" },
-      { status: 400 }
-    );
-  }
+export const POST = route(async (req) => {
+  const { token, newPassword } = await parseJson(req, resetBody);
 
   const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
   const resetToken = await prisma.passwordResetToken.findUnique({ where: { tokenHash } });
 
   if (!resetToken || resetToken.usedAt || resetToken.expiresAt < new Date()) {
-    return NextResponse.json(
-      { error: "Token tidak valid atau sudah kedaluwarsa" },
-      { status: 400 }
-    );
+    throw new ApiError(400, "INVALID_RESET_TOKEN", "Token tidak valid atau sudah kedaluwarsa");
   }
 
   const passwordHash = await bcrypt.hash(newPassword, 12);
@@ -35,4 +33,4 @@ export async function POST(req: Request) {
   ]);
 
   return NextResponse.json({ message: "Password berhasil direset" });
-}
+});

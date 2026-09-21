@@ -2,23 +2,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { assertCanView, requireAuth } from "@/lib/authz";
+import { route } from "@/lib/http";
 
 const DEFAULT_HOURS = 24;
 const MAX_HOURS = 24 * 30; // batas atas 30 hari biar query gak sembarangan berat
 
 // GET: time-series history (temperature per pack, voltage per cell) buat grafik tren.
 // Query: ?hours=24 (default 24, kalau melebihi MAX_HOURS di-clamp)
-export async function GET(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export const GET = route<{ params: Promise<{ id: string }> }>(async (req, { params }) => {
   const session = await requireAuth();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
   const { id } = await params;
 
-  const access = await assertCanView(id, session.user.id);
-  if (!access.ok) return access.response;
+  await assertCanView(id, session.user.id);
 
   const { searchParams } = new URL(req.url);
   const hoursParam = Number(searchParams.get("hours"));
@@ -82,4 +77,4 @@ export async function GET(
     }));
 
   return NextResponse.json({ from, to: new Date(), hours, packs });
-}
+});

@@ -3,6 +3,7 @@ import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import Button from "@/components/ui/button/Button";
 import { EyeCloseIcon, EyeIcon } from "@/icons";
+import { errorMessage } from "@/lib/api";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import React, { useState } from "react";
@@ -66,7 +67,7 @@ export default function ResetPasswordForm() {
     setIsLoading(false);
 
     if (!res.ok) {
-      setError(data?.error ?? "Gagal reset password. Coba lagi.");
+      setError(errorMessage(data, "Gagal reset password. Coba lagi."));
       return;
     }
 

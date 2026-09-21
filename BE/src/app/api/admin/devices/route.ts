@@ -1,17 +1,20 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/authz";
+import { parseQuery, route } from "@/lib/http";
+
+const listQuery = z.object({
+  verified: z.enum(["true", "false"]).optional(),
+});
 
 // GET: semua device, bisa filter ?verified=false buat liat yang pending approval
-export async function GET(req: Request) {
-  const session = await requireAdmin();
-  if (!session) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-  const { searchParams } = new URL(req.url);
-  const verifiedParam = searchParams.get("verified");
+export const GET = route(async (req) => {
+  await requireAdmin();
+  const { verified } = parseQuery(req, listQuery);
 
   const devices = await prisma.device.findMany({
-    where: verifiedParam !== null ? { verified: verifiedParam === "true" } : undefined,
+    where: verified !== undefined ? { verified: verified === "true" } : undefined,
     include: {
       owner: { select: { id: true, name: true, email: true } },
     },
@@ -19,4 +22,4 @@ export async function GET(req: Request) {
   });
 
   return NextResponse.json(devices);
-}
+});

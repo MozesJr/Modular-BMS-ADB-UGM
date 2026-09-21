@@ -2,21 +2,15 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/authz";
+import { err, route } from "@/lib/http";
 
-export async function DELETE(
-  _req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await requireAdmin();
-  if (!session) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
+export const DELETE = route<{ params: Promise<{ id: string }> }>(async (_req, { params }) => {
+  await requireAdmin();
   const { id } = await params;
 
   const device = await prisma.device.findUnique({ where: { id } });
-  if (!device) {
-    return NextResponse.json({ error: "Device tidak ditemukan" }, { status: 404 });
-  }
+  if (!device) throw err.notFound("Device tidak ditemukan", "DEVICE_NOT_FOUND");
 
   await prisma.device.delete({ where: { id } });
   return NextResponse.json({ message: "Device dihapus" });
-}
+});

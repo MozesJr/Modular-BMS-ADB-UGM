@@ -1,10 +1,28 @@
 // FE/src/lib/api.ts
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  code?: string;
+  requestId?: string;
+  constructor(status: number, message: string, code?: string, requestId?: string) {
     super(message);
     this.status = status;
+    this.code = code;
+    this.requestId = requestId;
   }
+}
+
+// Format error backend: { error: { code, message, details? }, requestId }.
+// Tetap menerima format lama { error: "pesan" } supaya aman selama transisi.
+export function errorMessage(data: unknown, fallback: string): string {
+  const error = (data as { error?: unknown } | null)?.error;
+  if (typeof error === "string") return error;
+  const message = (error as { message?: unknown } | null | undefined)?.message;
+  return typeof message === "string" ? message : fallback;
+}
+
+function errorCode(data: unknown): string | undefined {
+  const code = ((data as { error?: { code?: unknown } } | null)?.error)?.code;
+  return typeof code === "string" ? code : undefined;
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -18,7 +36,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const data = await res.json().catch(() => null);
-    throw new ApiError(res.status, data?.error ?? `Request gagal (${res.status})`);
+    throw new ApiError(
+      res.status,
+      errorMessage(data, `Request gagal (${res.status})`),
+      errorCode(data),
+      (data as { requestId?: string } | null)?.requestId,
+    );
   }
 
   if (res.status === 204) return undefined as T;

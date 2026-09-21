@@ -1,21 +1,21 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { err, parseJson, route } from "@/lib/http";
+import { emailSchema, nameSchema, newPasswordSchema } from "@/contracts/common";
 
-export async function POST(req: Request) {
-  const { name, email, password } = await req.json();
+const registerBody = z.object({
+  name: nameSchema.optional(),
+  email: emailSchema,
+  password: newPasswordSchema,
+});
 
-  if (!email || !password || password.length < 8) {
-    return NextResponse.json(
-      { error: "Email & password (min 8 karakter) wajib diisi" },
-      { status: 400 }
-    );
-  }
+export const POST = route(async (req) => {
+  const { name, email, password } = await parseJson(req, registerBody);
 
   const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
-    return NextResponse.json({ error: "Email sudah terdaftar" }, { status: 409 });
-  }
+  if (existing) throw err.conflict("Email sudah terdaftar", "EMAIL_TAKEN");
 
   const passwordHash = await bcrypt.hash(password, 12);
   const user = await prisma.user.create({
@@ -24,4 +24,4 @@ export async function POST(req: Request) {
   });
 
   return NextResponse.json(user, { status: 201 });
-}
+});

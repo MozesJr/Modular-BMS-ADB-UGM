@@ -2,14 +2,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, roleOf } from "@/lib/authz";
+import { err, route } from "@/lib/http";
 
-export async function GET(
-  _req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+type Ctx = { params: Promise<{ id: string }> };
+
+export const GET = route<Ctx>(async (_req, { params }) => {
   const session = await requireAuth();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
   const { id } = await params;
 
   const device = await prisma.device.findUnique({
@@ -23,13 +21,8 @@ export async function GET(
     },
   });
 
-  if (!device) {
-    return NextResponse.json({ error: "Device tidak ditemukan" }, { status: 404 });
-  }
-
-  if (!roleOf(device, session.user.id)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  if (!device) throw err.notFound("Device tidak ditemukan", "DEVICE_NOT_FOUND");
+  if (!roleOf(device, session.user.id)) throw err.forbidden();
 
   return NextResponse.json(device);
-}
+});

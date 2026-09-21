@@ -1,17 +1,20 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { sendPasswordResetEmail } from "@/lib/email";
+import { parseJson, route } from "@/lib/http";
+import { emailSchema } from "@/contracts/common";
 
-export async function POST(req: Request) {
-  const { email } = await req.json();
+const forgotBody = z.object({ email: emailSchema });
+
+export const POST = route(async (req) => {
+  const { email } = await parseJson(req, forgotBody);
 
   // Selalu balikin response yang sama, biar nggak bocorin apakah email terdaftar
   const genericResponse = NextResponse.json({
     message: "Kalau email terdaftar, link reset sudah dikirim.",
   });
-
-  if (!email) return genericResponse;
 
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) return genericResponse;
@@ -31,4 +34,4 @@ export async function POST(req: Request) {
   await sendPasswordResetEmail(user.email, resetUrl);
 
   return genericResponse;
-}
+});
