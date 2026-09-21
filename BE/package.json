@@ -8,7 +8,9 @@
     "start": "node dist/server.js",
     "lint": "next lint",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
@@ -20,7 +22,8 @@
     "nodemailer": "^6.10.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -28,8 +31,11 @@
     "@types/nodemailer": "^6.4.24",
     "@types/react": "^19.0.0",
     "@types/ws": "^8.5.12",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^15.5.23",
     "prisma": "^5.20.0",
     "tsx": "^4.19.1",
-    "typescript": "^5.6.2"
+    "typescript": "^5.6.2",
+    "vitest": "^3.2.7"
   }
 }
