@@ -72,6 +72,10 @@ d("ingestion (DB nyata sekali-pakai)", () => {
     expect(dev.packs[0].receivedAt?.toISOString()).toBe("2026-09-21T10:00:00.000Z");
     expect(await prisma.packHistory.count({ where: { deviceId: dev.id } })).toBe(1);
     expect(await prisma.cellHistory.count({ where: { deviceId: dev.id } })).toBe(2);
+    // current/power ikut masuk history (untuk grafik daya/arus)
+    const hist = await prisma.packHistory.findFirstOrThrow({ where: { deviceId: dev.id } });
+    expect(hist.current).toBe(-1.5);
+    expect(hist.power).toBe(-80);
   });
 
   it("idempoten: pesan yang sama dua kali tidak menggandakan history", async () => {

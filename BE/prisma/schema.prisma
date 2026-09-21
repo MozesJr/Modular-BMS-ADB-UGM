@@ -56,6 +56,8 @@ model Device {
   packs         Pack[]
   packHistory   PackHistory[]
   cellHistory   CellHistory[]
+
+  @@index([ownerId]) // GET /devices: OR(ownerId, collaborators.some(userId))
 }
 
 model DeviceCollaborator {
@@ -68,6 +70,7 @@ model DeviceCollaborator {
   addedAt  DateTime @default(now())
 
   @@unique([deviceId, userId])
+  @@index([userId])
 }
 
 // Latest state per pack — di-upsert tiap message MQTT masuk, buat tampilan real-time.
@@ -113,12 +116,15 @@ model PackHistory {
   packIndex         Int
   temperature       Float?
   balancerConnected Boolean
+  current           Float? // Ampere; negatif = charging (null = firmware lama belum mengirim)
+  power             Float? // Watt
   recordedAt        DateTime // waktu efektif data: jam device bila wajar, selain itu waktu server (§3 kontrak MQTT)
   receivedAt        DateTime? // waktu server menerima pesan (null = baris lama sebelum kolom ini ada)
   createdAt         DateTime @default(now())
 
   // Idempotensi: pesan duplikat (redelivery QoS 1) di-skip lewat createMany({ skipDuplicates }).
   @@unique([deviceId, packIndex, recordedAt])
+  @@index([deviceId, recordedAt]) // query rentang waktu per device (history, rollup, retensi)
 }
 
 // Time-series history per cell, buat grafik tren.
@@ -133,4 +139,5 @@ model CellHistory {
   createdAt  DateTime @default(now())
 
   @@unique([deviceId, packIndex, cellIndex, recordedAt])
+  @@index([deviceId, recordedAt])
 }

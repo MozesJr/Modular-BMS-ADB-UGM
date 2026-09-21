@@ -113,6 +113,8 @@ export async function persistSnapshot(job: IngestJob): Promise<PersistResult> {
           packIndex: pack.index,
           temperature: pack.temperature,
           balancerConnected: pack.balancerConnected,
+          current: pack.current ?? null,
+          power: pack.power ?? null,
           recordedAt,
           receivedAt,
         });
