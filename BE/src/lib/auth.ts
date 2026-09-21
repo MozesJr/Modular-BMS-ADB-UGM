@@ -1,7 +1,6 @@
 import NextAuth, { CredentialsSignin } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import bcrypt from "bcryptjs";
-import { prisma } from "@/lib/prisma";
+import { verifyCredentials } from "@/lib/credentials";
 
 class AccountExpiredError extends CredentialsSignin {
   code = "account_expired";
@@ -22,24 +21,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const password = credentials?.password as string | undefined;
         if (!email || !password) return null;
 
-        const user = await prisma.user.findUnique({ where: { email } });
-        if (!user) return null;
-
-        const valid = await bcrypt.compare(password, user.passwordHash);
-        if (!valid) return null;
-
-        if (user.expiresAt && user.expiresAt < new Date()) {
-          throw new AccountExpiredError();
+        const result = await verifyCredentials(email, password);
+        if (!result.ok) {
+          if (result.reason === "expired") throw new AccountExpiredError();
+          return null;
         }
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          expiresAt: user.expiresAt,
-          tokenVersion: user.tokenVersion,
-        };
+        return result.user;
       },
     }),
   ],

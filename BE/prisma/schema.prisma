@@ -29,6 +29,7 @@ model User {
   devicesOwned         Device[]              @relation("DeviceOwner")
   deviceCollaborations DeviceCollaborator[]
   passwordResetTokens  PasswordResetToken[]
+  refreshTokens        RefreshToken[]
 }
 
 model PasswordResetToken {
@@ -39,6 +40,29 @@ model PasswordResetToken {
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())
+}
+
+// Refresh token mobile (opaque). Hanya HASH yang disimpan; nilai mentah hanya ada di klien.
+// Satu login = satu "family"; setiap refresh memutar token (yang lama ditandai usedAt) dan family tetap sama.
+// Token yang sudah dipakai lalu dipakai lagi = indikasi pencurian -> seluruh family dicabut.
+model RefreshToken {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyId        String
+  tokenHash       String    @unique // sha256 hex dari token mentah
+  tokenVersion    Int // User.tokenVersion saat diterbitkan; beda = sesi dicabut (ganti/reset password, logout-all)
+  deviceName      String?
+  createdAt       DateTime  @default(now())
+  expiresAt       DateTime
+  familyExpiresAt DateTime // batas absolut umur family (login ulang setelah ini)
+  usedAt          DateTime? // sudah dirotasi
+  revokedAt       DateTime?
+  replacedById    String?
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
 }
 
 model Device {

@@ -10,6 +10,14 @@ import { prisma } from "./lib/prisma";
 import { log } from "./lib/logger";
 import { runtime } from "./lib/runtime-state";
 import { PEER_HEADER } from "./lib/client-ip";
+import { checkRequiredEnv } from "./lib/env-check";
+
+// Gagal cepat bila konfigurasi wajib salah (mis. JWT_ACCESS_SECRET) — lebih baik tidak start daripada 500 acak.
+const envProblems = checkRequiredEnv();
+if (envProblems.length > 0) {
+  for (const problem of envProblems) log.error("startup.invalid_env", { problem });
+  process.exit(1);
+}
 
 const dev = process.env.NODE_ENV !== "production";
 const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 4000;
