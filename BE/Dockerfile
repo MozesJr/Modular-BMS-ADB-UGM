@@ -4,7 +4,7 @@ WORKDIR /app
 RUN apk add --no-cache openssl
 
 FROM base AS deps
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json* .npmrc ./
 RUN npm ci
 
 FROM base AS builder
@@ -16,7 +16,7 @@ RUN npm run build
 # Hanya dependency produksi: tanpa prisma CLI, typescript, tsx, vitest, eslint.
 # Prisma Client hasil generate (node_modules/.prisma) disalin dari stage builder.
 FROM base AS prod-deps
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json* .npmrc ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
