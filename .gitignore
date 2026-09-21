@@ -4,3 +4,7 @@
 .env.production
 .env.local
 .DS_Store
+
+# hasil curl -c / cookie jar lokal: jangan pernah di-commit
+cookies*.txt
+*.credentials
