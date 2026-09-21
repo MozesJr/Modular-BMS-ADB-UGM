@@ -9,6 +9,7 @@ import { drainIngest } from "./mqtt/ingest";
 import { prisma } from "./lib/prisma";
 import { log } from "./lib/logger";
 import { runtime } from "./lib/runtime-state";
+import { PEER_HEADER } from "./lib/client-ip";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 4000;
@@ -20,6 +21,9 @@ const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   const server = createServer((req, res) => {
+    // Header internal: alamat socket asli (dipakai rate limiter bila tidak ada header proxy). Selalu
+    // ditimpa di sini supaya klien tidak bisa memalsukannya.
+    req.headers[PEER_HEADER] = req.socket.remoteAddress ?? "";
     const parsedUrl = parse(req.url ?? "", true);
     handle(req, res, parsedUrl);
   });

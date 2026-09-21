@@ -36,6 +36,8 @@ export default function SignInForm() {
     if (result?.error) {
       if (result.error === "account_expired") {
         setError("Akun Anda sudah expired. Mohon hubungi admin.");
+      } else if (result.error === "RateLimited" || result.code === "rate_limited") {
+        setError("Terlalu banyak percobaan masuk. Coba lagi beberapa menit lagi.");
       } else {
         setError("Email atau password salah.");
       }
