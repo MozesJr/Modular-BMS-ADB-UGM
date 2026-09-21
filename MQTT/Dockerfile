@@ -6,6 +6,7 @@ FROM eclipse-mosquitto:2.0.22
 # password_file sengaja TIDAK di-bake: itu secret, dibuat dengan scripts/init-passwd.sh dan di-mount dari secrets/.
 # (--chmod butuh BuildKit, default di Docker >= 23.)
 COPY --chown=1883:1883 --chmod=0600 config/mosquitto.conf /mosquitto/config/mosquitto.conf
+COPY --chown=1883:1883 --chmod=0600 config/acl_file /mosquitto/config/acl_file
 
 EXPOSE 1883
 

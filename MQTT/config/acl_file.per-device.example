@@ -1,0 +1,11 @@
+# CONTOH — BELUM AKTIF. Untuk tahap "user per device" (username = device_id = Device.serialNumber).
+# Mengaktifkan: ganti isi acl_file dengan ini, buat user per device dengan MQTT/scripts/add-device-user.sh,
+# hapus user bersama esp32_device, lalu reload: docker compose kill -s SIGHUP mosquitto
+# Prasyarat: firmware menyimpan kredensial unik per unit (NVS) dan memakai username = device_id.
+
+# %u = username klien. Tiap device hanya boleh menerbitkan ke topik miliknya sendiri.
+pattern write bms/%u/data
+pattern write bms/%u/status
+
+user backend_service
+topic read bms/#

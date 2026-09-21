@@ -1,0 +1,11 @@
+# MQTT/config/acl_file — ACL berbasis PERAN. Selain yang tertulis di bawah = DITOLAK (default deny).
+# (Per-device: lihat acl_file.per-device.example — belum diaktifkan, butuh provisioning kredensial per unit di firmware.)
+
+# Perangkat (ESP32): hanya boleh MENERBITKAN data dan status. Tidak boleh membaca apa pun.
+user esp32_device
+topic write bms/+/data
+topic write bms/+/status
+
+# Backend: hanya boleh MEMBACA semua topik bms/. Tidak boleh menerbitkan.
+user backend_service
+topic read bms/#
