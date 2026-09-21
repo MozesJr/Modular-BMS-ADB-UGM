@@ -88,7 +88,7 @@ Keputusan: **jam device tidak dipercaya penuh** (belum dipastikan firmware sinkr
 |---|---|
 | Sensor fault | Suhu di luar rentang menjadi `null` + counter `mqtt.sensor_fault`; pesan tidak ditolak (lihat §2). |
 | Validasi | Payload divalidasi zod. Yang gagal **dibuang** (tidak disimpan, tidak di-broadcast), dihitung di counter `mqtt.invalid*` dan dicatat sebagai log JSON `mqtt.invalid_payload` (dibatasi 1 log/10 dtk per device+alasan; isi payload tidak dicatat). |
-| Auto-provision | Serial baru otomatis dibuat sebagai `Device` tanpa owner (`verified=false`). Diklaim lewat aplikasi/web. |
+| Auto-provision | Serial baru otomatis dibuat sebagai `Device` tanpa owner (`verified=false`), diklaim lewat aplikasi/web. **Dibatasi** `PROVISION_MAX_PER_HOUR` device baru per jam (default 20; `0` = auto-provision mati, hanya serial yang sudah didaftarkan yang diterima). Kelebihannya dibuang, counter `mqtt.provision_limited`, log `mqtt.provision_limited` (maks 1/30 dtk). Device yang sudah ada tidak terpengaruh. |
 | Idempotensi | Riwayat unik per `(deviceId, packIndex, recordedAt)` (+ `cellIndex` untuk cell). Pesan duplikat (mis. redelivery QoS 1) diabaikan. **Batasan:** bila jam device menyimpang dan `recordedAt` diganti waktu server, redelivery mendapat `receivedAt` berbeda sehingga *bisa* tersimpan ganda. Mitigasi jangka panjang: field `seq` monotonik dari firmware (belum di kontrak). |
 | Urutan | State "terbaru" (`Pack`/`Cell`) **tidak ditimpa** oleh pesan dengan `recordedAt` lebih lama dari yang sudah tersimpan. Riwayat tetap menyimpan semuanya. |
 | Backpressure | Antrean bounded per device; bila penuh, pesan paling lama dibuang dan dihitung `mqtt.dropped`. |

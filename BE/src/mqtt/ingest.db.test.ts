@@ -21,6 +21,8 @@ const d = safe ? describe : describe.skip;
 d("ingestion (DB nyata sekali-pakai)", () => {
   let prisma: typeof import("@/lib/prisma").prisma;
   let persistWithRetry: typeof import("./ingest").persistWithRetry;
+  let ProvisionLimitedError: typeof import("./ingest").ProvisionLimitedError;
+  let limitMod: typeof import("./provision-limit");
   let n = 0;
   const serial = () => `TEST-${Date.now()}-${++n}`;
 
@@ -50,7 +52,9 @@ d("ingestion (DB nyata sekali-pakai)", () => {
   beforeAll(async () => {
     process.env.DATABASE_URL = url; // sebelum PrismaClient dibuat
     ({ prisma } = await import("@/lib/prisma"));
-    ({ persistWithRetry } = await import("./ingest"));
+    ({ persistWithRetry, ProvisionLimitedError } = await import("./ingest"));
+    limitMod = await import("./provision-limit");
+    limitMod.setProvisionLimiter(new limitMod.ProvisionLimiter(1000)); // longgar untuk tes lain
   });
   afterAll(async () => {
     await prisma?.$disconnect();
@@ -150,5 +154,34 @@ d("ingestion (DB nyata sekali-pakai)", () => {
     await persistWithRetry(two);
     const dev = await prisma.device.findUniqueOrThrow({ where: { serialNumber: s }, include: { packs: true } });
     expect(dev.packs.map((p) => p.index).sort()).toEqual([0, 1]);
+  });
+
+  it("M3: batas auto-provision per jam — serial baru ke-N+1 dibuang, device yang sudah ada tetap diproses", async () => {
+    const known = serial();
+    await persistWithRetry(job(known, "2026-09-21T09:00:00.000Z", 20)); // dibuat dengan limiter longgar
+    limitMod.setProvisionLimiter(new limitMod.ProvisionLimiter(2));
+    try {
+      const a = serial(), b = serial(), c = serial();
+      await persistWithRetry(job(a, "2026-09-21T09:00:00.000Z", 20));
+      await persistWithRetry(job(b, "2026-09-21T09:00:00.000Z", 20));
+      await expect(persistWithRetry(job(c, "2026-09-21T09:00:00.000Z", 20))).rejects.toBeInstanceOf(ProvisionLimitedError);
+      expect(await prisma.device.count({ where: { serialNumber: c } })).toBe(0);
+      // device yang sudah terdaftar tidak terpengaruh kuota
+      const again = await persistWithRetry(job(known, "2026-09-21T09:00:10.000Z", 22));
+      expect(again.packsUpdated).toBe(1);
+    } finally {
+      limitMod.setProvisionLimiter(new limitMod.ProvisionLimiter(1000));
+    }
+  });
+
+  it("M3: PROVISION_MAX_PER_HOUR=0 mematikan auto-provision sepenuhnya", async () => {
+    limitMod.setProvisionLimiter(new limitMod.ProvisionLimiter(0));
+    try {
+      const s = serial();
+      await expect(persistWithRetry(job(s, "2026-09-21T09:00:00.000Z", 20))).rejects.toBeInstanceOf(ProvisionLimitedError);
+      expect(await prisma.device.count({ where: { serialNumber: s } })).toBe(0);
+    } finally {
+      limitMod.setProvisionLimiter(new limitMod.ProvisionLimiter(1000));
+    }
   });
 });

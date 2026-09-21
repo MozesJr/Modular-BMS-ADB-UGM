@@ -6,6 +6,7 @@ import { log } from "@/lib/logger";
 import { incr, runtime } from "@/lib/runtime-state";
 import { KeyedQueue } from "@/lib/keyed-queue";
 import type { BmsDevicePayload } from "@/mqtt/schema";
+import { getProvisionLimiter } from "@/mqtt/provision-limit";
 
 // Pipeline ingestion: antrean bounded per device -> satu transaksi batch per pesan.
 // Query per pesan KONSTAN (±5) berapa pun jumlah pack/cell (sebelumnya 1 + packs×(1+cells)).
@@ -28,12 +29,20 @@ const intEnv = (name: string, fallback: number) => {
 const ts = (d: Date) => Prisma.sql`${d.toISOString()}::timestamp`;
 const NOW_UTC = Prisma.sql`(now() AT TIME ZONE 'UTC')`;
 
+// Dilempar bila serial belum dikenal dan kuota auto-provision per jam sudah habis (pesan dibuang).
+export class ProvisionLimitedError extends Error {
+  constructor(readonly serialNumber: string) {
+    super("auto-provision limit reached");
+  }
+}
+
 async function ensureDevice(serialNumber: string) {
   const existing = await prisma.device.findUnique({
     where: { serialNumber },
     select: { id: true, serialNumber: true },
   });
   if (existing) return existing;
+  if (!getProvisionLimiter().tryAcquire()) throw new ProvisionLimitedError(serialNumber);
   try {
     return await prisma.device.create({
       data: { serialNumber },
@@ -167,6 +176,15 @@ export async function persistWithRetry(job: IngestJob, attempts = 3): Promise<Pe
 
 // ---------- antrean ----------
 
+// Log "provision limited" dibatasi 1 per 30 detik (counter tetap akurat) agar banjir serial ngawur tidak membanjiri log.
+let lastProvisionLogAt = 0;
+function shouldLogProvisionLimited(): boolean {
+  const now = Date.now();
+  if (now - lastProvisionLogAt < 30_000) return false;
+  lastProvisionLogAt = now;
+  return true;
+}
+
 let queue: KeyedQueue<IngestJob> | null = null;
 
 function getQueue(): KeyedQueue<IngestJob> {
@@ -191,6 +209,13 @@ function getQueue(): KeyedQueue<IngestJob> {
       });
     },
     onError: (key, err) => {
+      if (err instanceof ProvisionLimitedError) {
+        incr("mqtt.provision_limited");
+        if (shouldLogProvisionLimited()) {
+          log.warn("mqtt.provision_limited", { deviceId: key, maxPerHour: getProvisionLimiter().maxPerHour });
+        }
+        return;
+      }
       incr("mqtt.failed");
       log.error("ingest.persist_failed", { deviceId: key, err });
     },
