@@ -12,7 +12,9 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "mqtt:schema": "tsx scripts/gen-mqtt-schema.ts",
-    "test:db": "bash scripts/test-with-db.sh"
+    "test:db": "bash scripts/test-with-db.sh",
+    "smoke:web": "bash scripts/with-test-db.sh npx tsx scripts/smoke-web-auth.ts",
+    "smoke:web:fe": "bash scripts/smoke-web-with-fe.sh"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
