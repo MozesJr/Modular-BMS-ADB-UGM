@@ -1,7 +1,7 @@
 // BE/src/app/api/devices/[id]/history/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/authz";
+import { assertCanView, requireAuth } from "@/lib/authz";
 
 const DEFAULT_HOURS = 24;
 const MAX_HOURS = 24 * 30; // batas atas 30 hari biar query gak sembarangan berat
@@ -17,19 +17,8 @@ export async function GET(
 
   const { id } = await params;
 
-  const device = await prisma.device.findUnique({
-    where: { id },
-    include: { collaborators: true },
-  });
-  if (!device) {
-    return NextResponse.json({ error: "Device tidak ditemukan" }, { status: 404 });
-  }
-
-  const isOwner = device.ownerId === session.user.id;
-  const isCollaborator = device.collaborators.some((c) => c.userId === session.user.id);
-  if (!isOwner && !isCollaborator) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  const access = await assertCanView(id, session.user.id);
+  if (!access.ok) return access.response;
 
   const { searchParams } = new URL(req.url);
   const hoursParam = Number(searchParams.get("hours"));

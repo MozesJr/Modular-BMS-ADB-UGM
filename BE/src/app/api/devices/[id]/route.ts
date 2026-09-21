@@ -1,7 +1,7 @@
 // BE/src/app/api/devices/[id]/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/authz";
+import { requireAuth, roleOf } from "@/lib/authz";
 
 export async function GET(
   _req: Request,
@@ -27,10 +27,7 @@ export async function GET(
     return NextResponse.json({ error: "Device tidak ditemukan" }, { status: 404 });
   }
 
-  const isOwner = device.ownerId === session.user.id;
-  const isCollaborator = device.collaborators.some((c) => c.userId === session.user.id);
-
-  if (!isOwner && !isCollaborator) {
+  if (!roleOf(device, session.user.id)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

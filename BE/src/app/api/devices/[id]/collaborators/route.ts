@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/authz";
-
-async function assertOwner(deviceId: string, userId: string) {
-  const device = await prisma.device.findUnique({ where: { id: deviceId } });
-  return device?.ownerId === userId;
-}
+import { assertCanView, assertOwner, requireAuth } from "@/lib/authz";
 
 export async function GET(
   _req: Request,
@@ -15,6 +10,10 @@ export async function GET(
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
+  // Sebelumnya hanya cek "sudah login" -> user mana pun bisa membaca collaborator device lain (IDOR).
+  const access = await assertCanView(id, session.user.id);
+  if (!access.ok) return access.response;
+
   const collaborators = await prisma.deviceCollaborator.findMany({
     where: { deviceId: id },
     include: { user: { select: { id: true, name: true, email: true } } },
@@ -32,10 +31,8 @@ export async function POST(
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
-  const isOwner = await assertOwner(id, session.user.id);
-  if (!isOwner) {
-    return NextResponse.json({ error: "Hanya owner device yang bisa menambah collaborator" }, { status: 403 });
-  }
+  const ownerCheck = await assertOwner(id, session.user.id, "Hanya owner device yang bisa menambah collaborator");
+  if (!ownerCheck.ok) return ownerCheck.response;
 
   const { email, role } = await req.json();
   if (!email) return NextResponse.json({ error: "Email wajib diisi" }, { status: 400 });
@@ -69,10 +66,8 @@ export async function DELETE(
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
-  const isOwner = await assertOwner(id, session.user.id);
-  if (!isOwner) {
-    return NextResponse.json({ error: "Hanya owner device yang bisa menghapus collaborator" }, { status: 403 });
-  }
+  const ownerCheck = await assertOwner(id, session.user.id, "Hanya owner device yang bisa menghapus collaborator");
+  if (!ownerCheck.ok) return ownerCheck.response;
 
   const { searchParams } = new URL(req.url);
   const userId = searchParams.get("userId");
