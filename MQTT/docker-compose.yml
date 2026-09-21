@@ -1,19 +1,26 @@
-# mqtt/docker-compose.yml
+# MQTT/docker-compose.yml
+# Broker Mosquitto milik repo ini (bagian dari root `include:`).
+# Port 1883 TIDAK dipublish ke host: hanya service di network Docker "bms-network" (mis. backend) yang bisa
+# mencapai broker sebagai bms-mqtt:1883. Untuk membuka ke ESP32 di internet, pakai override eksplisit:
+#   docker-compose.public.yml  (lihat MQTT/README.md dan docs/MQTT-CONTRACT.md §5)
+#
+# Prasyarat sebelum `up`: buat MQTT/secrets/password_file dengan  MQTT/scripts/init-passwd.sh
 services:
   mosquitto:
     build: .
     image: bms-mqtt:local
     container_name: bms-mqtt
-    ports:
-      - "1883:1883"
     volumes:
-      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - ./config/password_file:/mosquitto/config/password_file:ro
+      # Mount FOLDER secrets (bukan file tunggal): kalau password_file belum dibuat, Mosquitto gagal start dengan
+      # pesan jelas ("Unable to open pwfile"), alih-alih Docker diam-diam membuat DIREKTORI bernama password_file.
+      - ./secrets:/mosquitto/secrets:ro
       - mosquitto-data:/mosquitto/data
       - mosquitto-log:/mosquitto/log
     networks:
       - bms-network
     restart: unless-stopped
+    stop_grace_period: 10s
+    # HEALTHCHECK didefinisikan di Dockerfile (nc -z 127.0.0.1 1883).
 
 networks:
   bms-network:

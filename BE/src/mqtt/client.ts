@@ -22,7 +22,7 @@ let client: MqttClient | null = null;
 export function registerMqttSubscriber() {
   if (client) return client; // guard: cegah subscribe dobel saat hot-reload dev
 
-  const brokerUrl = process.env.MQTT_BROKER_URL ?? "mqtt://mqtt:1883";
+  const brokerUrl = process.env.MQTT_BROKER_URL ?? "mqtt://bms-mqtt:1883";
 
   client = mqtt.connect(brokerUrl, {
     username: process.env.MQTT_USERNAME,
