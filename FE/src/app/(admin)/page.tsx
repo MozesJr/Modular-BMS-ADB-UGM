@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import React from "react";
-import BmsSystemMetrics1 from "@/components/bms/BmsSystemMetrics";
+import BmsSystemMetrics from "@/components/bms/BmsSystemMetrics";
 import BmsPowerFlowChart from "@/components/bms/BmsPowerFlowChart";
 import BmsVoltageTrendChart from "@/components/bms/BmsVoltageTrendChart";
 import BmsActiveDevicesList from "@/components/bms/BmsActiveDevicesList";
-import BmsEnergyDistributionCard from "@/components/bms/BmsEnergyDistributionCard";
 
 export const metadata: Metadata = {
   title: "GAMA BMS Dashboard - System Telemetry",
@@ -14,18 +13,14 @@ export const metadata: Metadata = {
 export default function BmsDashboard() {
   return (
     <div className="grid grid-cols-12 gap-4 md:gap-6">
-      {/* Baris 1: Kartu Metrik Utama Sistem (Total Power, SOC Rata-rata, Arus, Tegangan) */}
+      {/* Baris 1: ringkasan nyata dari /api/v1/dashboard/summary */}
       <div className="col-span-12">
-        <BmsSystemMetrics1 />
+        <BmsSystemMetrics />
       </div>
 
-      {/* Baris 2: Grafik Aliran Daya / Power Flow & Monthly Target (Dial / Radial SoC) */}
-      <div className="col-span-12 space-y-6 xl:col-span-7">
+      {/* Baris 2: Grafik aliran daya (DEMO: data contoh). Kartu SoH dihapus: SoC/SoH belum ada di payload perangkat. */}
+      <div className="col-span-12">
         <BmsPowerFlowChart />
-      </div>
-
-      <div className="col-span-12 xl:col-span-5">
-        <BmsEnergyDistributionCard />
       </div>
 
       {/* Baris 3: Grafik Telemetri Grafik Tegangan/Suhu Historis ala Grafana */}

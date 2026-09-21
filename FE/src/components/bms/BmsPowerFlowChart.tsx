@@ -55,8 +55,10 @@ export default function BmsPowerFlowChart() {
     <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] sm:p-6 shadow-sm">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-lg font-semibold text-gray-800 dark:text-white/90">Power Flow & Energy Exchange</h3>
-          <p className="text-xs text-gray-500">Perbandingan daya masuk (Charging) dan keluar (Load) harian</p>
+          <h3 className="text-lg font-semibold text-gray-800 dark:text-white/90">
+            Power Flow & Energy Exchange <span className="ml-2 align-middle rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">DEMO</span>
+          </h3>
+          <p className="text-xs text-gray-500">Data contoh, bukan data perangkat. Riwayat daya nyata per device ada di halaman detail device.</p>
         </div>
         <div className="relative inline-block">
           <button onClick={() => setIsOpen(!isOpen)} className="dropdown-toggle">
