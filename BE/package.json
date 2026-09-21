@@ -11,7 +11,8 @@
     "prisma:migrate": "prisma migrate dev",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "mqtt:schema": "tsx scripts/gen-mqtt-schema.ts"
+    "mqtt:schema": "tsx scripts/gen-mqtt-schema.ts",
+    "test:db": "bash scripts/test-with-db.sh"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
