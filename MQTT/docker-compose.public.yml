@@ -1,0 +1,21 @@
+# MQTT/docker-compose.public.yml — OVERRIDE OPSIONAL: membuka broker ke internet supaya ESP32 bisa terhubung.
+# TIDAK ikut root `include:`; aktifkan dengan sengaja (dari folder root repo):
+#   docker compose -f docker-compose.yml -f MQTT/docker-compose.public.yml up -d mosquitto
+# Kembali ke internal-saja: jalankan `docker compose up -d mosquitto` tanpa -f override ini.
+#
+# KEPUTUSAN PROYEK: ESP32 mencapai broker lewat port publik 1883 + ACL, SEMENTARA.
+# PERINGATAN: 1883 = MQTT TANPA TLS. Username/password dan payload lewat internet dalam bentuk cleartext.
+# Yang melindungi: allow_anonymous false, ACL peran (config/acl_file), message_size_limit, max_connections,
+# batas auto-provision di backend (PROVISION_MAX_PER_HOUR). Yang TIDAK ada: kerahasiaan/integritas transport.
+#
+# Kurangi risiko:
+#   - firewall: batasi sumber bila IP device statis  ->  ufw allow from <IP-device> to any port 1883 proto tcp
+#     (Docker mem-bypass ufw untuk port yang di-publish; lihat MQTT/README.md bagian Firewall)
+#   - rencanakan TLS 8883 (butuh domain DNS-only, sertifikat, dan WiFiClientSecure di firmware)
+#
+# CATATAN: Cloudflare Tunnel TIDAK bisa dipakai untuk ESP32: ESP32 tidak bisa menjalankan cloudflared, dan meneruskan TCP mentah
+# ke klien tanpa agen (Cloudflare Spectrum) adalah produk berbayar. Rekaman DNS untuk broker harus "DNS only" (bukan proxied).
+services:
+  mosquitto:
+    ports:
+      - "1883:1883"
