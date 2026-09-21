@@ -47,6 +47,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Password minimal 8 karakter" }, { status: 400 });
     }
     data.passwordHash = await bcrypt.hash(password, 12);
+    data.tokenVersion = { increment: 1 }; // paksa logout semua sesi user ini
   }
 
   const user = await prisma.user.update({

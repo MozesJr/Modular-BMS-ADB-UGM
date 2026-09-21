@@ -1,25 +1,50 @@
 import { NextResponse } from "next/server";
+import type { Role } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { roleOf } from "@/lib/device-role";
 import type { DeviceRole } from "@/lib/device-role";
 
-// JWT session (no PrismaAdapter) gak pernah di-invalidate otomatis kalau row User-nya
-// udah gak ada — bisa terjadi pas development (DB direset/reseed sementara browser masih
-// nyimpen cookie lama). Tanpa cek ini, request lolos "authenticated" tapi nanti gagal di
-// query/insert Prisma dengan error FK yang membingungkan. Verifikasi user-nya BENERAN masih
-// ada dulu, treat sebagai unauthenticated kalau enggak.
-async function getValidSession() {
+// JWT session (no PrismaAdapter) tidak pernah di-invalidate otomatis. Karena itu SETIAP request
+// diverifikasi ulang ke DB (satu query PK) untuk hal-hal yang tidak boleh basi:
+//   - user masih ada (DB direset / user dihapus)
+//   - akun belum expired (expiresAt) -> berlaku SEKETIKA, bukan hanya saat login
+//   - tokenVersion sama dengan yang di token (password diganti/direset -> semua sesi lama mati)
+//   - role diambil dari DB, bukan dari JWT (admin yang diturunkan langsung kehilangan akses)
+export type AuthSession = {
+  user: {
+    id: string;
+    role: Role;
+    expiresAt: string | null;
+    tokenVersion: number;
+    name?: string | null;
+    email?: string | null;
+  };
+};
+
+async function getValidSession(): Promise<AuthSession | null> {
   const session = await auth();
-  if (!session?.user) return null;
+  const sessionUser = session?.user;
+  if (!sessionUser || typeof sessionUser.id !== "string") return null;
 
   const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { id: true },
+    where: { id: sessionUser.id },
+    select: { id: true, role: true, expiresAt: true, tokenVersion: true, name: true, email: true },
   });
   if (!user) return null;
+  if (user.expiresAt && user.expiresAt.getTime() <= Date.now()) return null;
+  if ((sessionUser.tokenVersion ?? 0) !== user.tokenVersion) return null;
 
-  return session;
+  return {
+    user: {
+      id: user.id,
+      role: user.role,
+      expiresAt: user.expiresAt ? user.expiresAt.toISOString() : null,
+      tokenVersion: user.tokenVersion,
+      name: user.name,
+      email: user.email,
+    },
+  };
 }
 
 export async function requireAuth() {

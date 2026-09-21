@@ -38,23 +38,26 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           name: user.name,
           role: user.role,
           expiresAt: user.expiresAt,
+          tokenVersion: user.tokenVersion,
         };
       },
     }),
   ],
   callbacks: {
-jwt({ token, user }) {
-  if (user) {
-    token.id = user.id as string;
-    token.role = user.role;
-    token.expiresAt = user.expiresAt ? user.expiresAt.toISOString() : null;
-  }
-  return token;
-},
+    jwt({ token, user }) {
+      if (user) {
+        token.id = user.id as string;
+        token.role = user.role;
+        token.expiresAt = user.expiresAt ? user.expiresAt.toISOString() : null;
+        token.tv = user.tokenVersion;
+      }
+      return token;
+    },
     session({ session, token }) {
       if (session.user) {
         session.user.id = token.id;
         session.user.role = token.role;
+        session.user.tokenVersion = token.tv ?? 0; // JWT lama (sebelum ada tv) dianggap versi 0
         (session.user as unknown as Record<string, unknown>).expiresAt = token.expiresAt;
       }
       return session;

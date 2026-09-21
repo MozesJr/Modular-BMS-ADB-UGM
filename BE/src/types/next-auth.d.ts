@@ -7,12 +7,14 @@ declare module "next-auth" {
     id: string;
     role: Role;
     expiresAt: Date | null;
+    tokenVersion: number;
   }
   interface Session {
     user: {
       id: string;
       role: Role;
       expiresAt: string | null;
+      tokenVersion: number;
     } & DefaultSession["user"];
   }
 }
@@ -22,6 +24,8 @@ declare module "next-auth/jwt" {
     id: string;
     role: Role;
     expiresAt: string | null;
+    // versi token user saat login; undefined pada JWT lama -> dianggap 0
+    tv?: number;
   }
 }
 

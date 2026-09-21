@@ -20,6 +20,9 @@ model User {
   emailVerified DateTime?
   role          Role      @default(USER)
   expiresAt     DateTime? // null = tidak pernah expired
+  // Naik setiap password diganti/direset atau saat "logout dari semua perangkat".
+  // Token (JWT web maupun access token mobile) yang membawa versi lama otomatis ditolak.
+  tokenVersion  Int       @default(0)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

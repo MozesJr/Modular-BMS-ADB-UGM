@@ -26,7 +26,11 @@ export async function POST(req: Request) {
   const passwordHash = await bcrypt.hash(newPassword, 12);
 
   await prisma.$transaction([
-    prisma.user.update({ where: { id: resetToken.userId }, data: { passwordHash } }),
+    // tokenVersion++ -> semua sesi web/mobile yang sudah ada langsung tidak berlaku
+    prisma.user.update({
+      where: { id: resetToken.userId },
+      data: { passwordHash, tokenVersion: { increment: 1 } },
+    }),
     prisma.passwordResetToken.update({ where: { id: resetToken.id }, data: { usedAt: new Date() } }),
   ]);
 
