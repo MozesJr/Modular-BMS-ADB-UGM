@@ -8,6 +8,8 @@ import {
   DevicesQuerySchema,
   ErrorResponseSchema,
   HealthResponseSchema,
+  HistoryQuerySchema,
+  HistoryResponseSchema,
   MeSchema,
   LoginRequestSchema,
   LogoutRequestSchema,
@@ -235,6 +237,30 @@ endpoint({
   operationId: "getDashboardSummary",
   success: { status: 200, description: "Ringkasan", schema: DashboardSummarySchema },
   errors: [401],
+  headers: ETAG_HEADER,
+  notModified: true,
+});
+
+// ---------------------------------------------------------------------------------------------
+// Riwayat (B4)
+// ---------------------------------------------------------------------------------------------
+endpoint({
+  method: "get",
+  path: "/api/v1/devices/{id}/history",
+  tag: "Riwayat",
+  summary: "Riwayat telemetri (time-series)",
+  description:
+    "Seri per pack (`temperature` °C, `current` A, `power` W) atau per cell (`voltage` V). Default: 24 jam terakhir, bucket 5m, metrics temperature,current,power.\n\n" +
+    "- `bucket=raw`: sampel asli; rentang maks 48 jam; `voltage` tidak boleh digabung dengan metrik pack; halaman berikutnya lewat `nextCursor` → `?cursor=`.\n" +
+    "- `bucket=1m|5m|1h`: agregat (v = rata-rata, min, max) dihitung di database; total titik dibatasi ~20.000 (lebih dari itu → 400 VALIDATION_ERROR dengan saran bucket/rentang).\n" +
+    "- Data lebih tua dari 30 hari hanya ada sebagai agregat (rollup 1 menit), bucket tetap 1m/5m/1h.\n" +
+    "- Bucket tanpa sampel tidak muncul; titik null dibuang; `temperature` null (sensor error) tidak muncul sebagai titik.\n" +
+    "Mendukung ETag/If-None-Match.",
+  operationId: "getDeviceHistory",
+  params: IdParam,
+  query: HistoryQuerySchema,
+  success: { status: 200, description: "Seri waktu", schema: HistoryResponseSchema },
+  errors: [400, 401, 404],
   headers: ETAG_HEADER,
   notModified: true,
 });

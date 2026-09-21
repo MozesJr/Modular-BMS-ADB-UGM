@@ -18,7 +18,8 @@
     "smoke:container": "bash scripts/smoke-container.sh",
     "openapi": "tsx scripts/gen-openapi.ts",
     "openapi:check": "tsx scripts/gen-openapi.ts --check",
-    "smoke:api": "bash scripts/with-test-db.sh npx tsx scripts/smoke-api-v1.ts"
+    "smoke:api": "bash scripts/with-test-db.sh npx tsx scripts/smoke-api-v1.ts",
+    "retention": "tsx src/scripts/retention.ts"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^9.1.0",

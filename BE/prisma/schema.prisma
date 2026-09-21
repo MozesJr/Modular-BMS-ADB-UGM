@@ -80,6 +80,8 @@ model Device {
   packs         Pack[]
   packHistory   PackHistory[]
   cellHistory   CellHistory[]
+  packRollups   PackRollup1m[]
+  cellRollups   CellRollup1m[]
 
   @@index([ownerId]) // GET /devices: OR(ownerId, collaborators.some(userId))
 }
@@ -164,4 +166,42 @@ model CellHistory {
 
   @@unique([deviceId, packIndex, cellIndex, recordedAt])
   @@index([deviceId, recordedAt])
+}
+// Rollup 1 menit dari PackHistory (dibuat oleh scripts/retention.ts). Disimpan avg/min/max + count per metrik supaya bisa
+// di-bucket ulang (5m/1h) dengan rata-rata berbobot yang eksak. Raw dihapus setelah 30 hari; rollup disimpan lebih lama.
+model PackRollup1m {
+  deviceId     String
+  device       Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  packIndex    Int
+  bucketStart  DateTime // awal menit (UTC)
+  samples      Int
+  tempAvg      Float?
+  tempMin      Float?
+  tempMax      Float?
+  tempCount    Int      @default(0)
+  currentAvg   Float?
+  currentMin   Float?
+  currentMax   Float?
+  currentCount Int      @default(0)
+  powerAvg     Float?
+  powerMin     Float?
+  powerMax     Float?
+  powerCount   Int      @default(0)
+
+  @@id([deviceId, packIndex, bucketStart])
+}
+
+// Rollup 1 menit dari CellHistory.
+model CellRollup1m {
+  deviceId    String
+  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  packIndex   Int
+  cellIndex   Int
+  bucketStart DateTime
+  samples     Int
+  vAvg        Float
+  vMin        Float
+  vMax        Float
+
+  @@id([deviceId, packIndex, cellIndex, bucketStart])
 }

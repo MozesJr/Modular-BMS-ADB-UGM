@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ApiError } from "@/lib/http";
 
 // Cursor pagination opaque: base64url(JSON). Klien memperlakukannya sebagai string buram.
-export function encodeCursor(payload: Record<string, string | number>): string {
+export function encodeCursor(payload: Record<string, string | number | null>): string {
   return Buffer.from(JSON.stringify(payload)).toString("base64url");
 }
 

@@ -7,7 +7,7 @@ import { PrismaClient } from "@prisma/client";
 import { createUser, makeClient, Reporter, requireTestDb, seedDevice, spawnServer, waitHealth, serverEnv, SMOKE_NEXTAUTH_SECRET } from "./_smoke-lib";
 import { spawnSync } from "node:child_process";
 import {
-  TokenResponseSchema, ErrorResponseSchema, MeSchema, DeviceListResponseSchema, DeviceDetailSchema, DashboardSummarySchema,
+  TokenResponseSchema, ErrorResponseSchema, MeSchema, DeviceListResponseSchema, DeviceDetailSchema, DashboardSummarySchema, HistoryResponseSchema,
 } from "../src/contracts/schemas";
 import { SignJWT } from "jose";
 
@@ -182,13 +182,62 @@ async function readSection() {
   return { owner, viewer, stranger, A, B, C, ot, vt, st };
 }
 
+async function historySection(ctx: Awaited<ReturnType<typeof readSection>>) {
+  const { A, ot, vt, st } = ctx;
+  // 3 jam data per menit (2 pack) + cell pack 0, berakhir 5 menit lalu
+  const end = Date.now() - 5 * 60_000;
+  const packRows: { deviceId: string; packIndex: number; recordedAt: Date; temperature: number | null; current: number | null; power: number | null; balancerConnected: boolean }[] = [];
+  const cellRows: { deviceId: string; packIndex: number; cellIndex: number; recordedAt: Date; voltage: number }[] = [];
+  for (let k = 0; k < 180; k++) {
+    const recordedAt = new Date(Math.floor((end - k * 60_000) / 60_000) * 60_000);
+    for (const packIndex of [0, 1]) packRows.push({ deviceId: A.id, packIndex, recordedAt, temperature: packIndex === 1 && k % 10 === 0 ? null : 25 + (k % 5), current: -2, power: -100 - k, balancerConnected: true });
+    for (const cellIndex of [0, 1, 2, 3]) cellRows.push({ deviceId: A.id, packIndex: 0, cellIndex, recordedAt, voltage: 3.3 + cellIndex * 0.01 });
+  }
+  await prisma.packHistory.createMany({ data: packRows });
+  await prisma.cellHistory.createMany({ data: cellRows });
+
+  const q = (path: string, token = ot, headers: Record<string, string> = {}) => call("GET", `/api/v1/devices/${A.id}/history${path}`, { token, headers });
+
+  const def = await q("");
+  const h = R.schema("history default (5m, 24 jam)", HistoryResponseSchema, def.json);
+  R.ok("default: bucket 5m dan 6 seri (2 pack × temperature/current/power)", !!h && h.bucket === "5m" && h.series.length === 6, JSON.stringify(h?.series.map((s) => `${s.packIndex}${s.metric}`)));
+  const pw = h?.series.find((s) => s.packIndex === 0 && s.metric === "power");
+  R.ok("power pack0: unit W, titik naik waktu, v/min/max terisi", pw?.unit === "W" && pw.points.length > 20 && pw.points.every((p, i, a) => i === 0 || a[i - 1].t < p.t) && pw.points[0].min !== null && pw.points[0].max !== null);
+  R.ok("suhu null (pack1) tidak menghasilkan titik null", h?.series.filter((s) => s.metric === "temperature").every((s) => s.points.every((p) => typeof p.v === "number")) === true);
+
+  const raw = await q("?bucket=raw&metrics=power&packIndex=0&limit=50");
+  R.schema("history raw", HistoryResponseSchema, raw.json);
+  R.ok("raw: 50 titik + nextCursor", raw.json.series[0].points.length === 50 && typeof raw.json.nextCursor === "string" && raw.json.series[0].points[0].min === null);
+  const raw2 = await q(`?bucket=raw&metrics=power&packIndex=0&limit=50&cursor=${encodeURIComponent(raw.json.nextCursor)}`);
+  R.ok("raw halaman 2 dimulai setelah halaman 1 (tanpa tumpang tindih)", raw2.json.series[0].points[0].t > raw.json.series[0].points[49].t);
+
+  const volt = await q("?bucket=1m&metrics=voltage&packIndex=0&from=" + encodeURIComponent(new Date(end - 30 * 60_000).toISOString()));
+  R.ok("voltage 1m: 4 seri cell, satuan V", volt.status === 200 && volt.json.series.length === 4 && volt.json.series.every((s: any) => s.scope === "cell" && s.unit === "V"), String(volt.status));
+
+  R.ok("metric tidak dikenal (soc) -> 400 dengan path metrics", (await q("?metrics=soc")).json?.error?.details?.[0]?.path === "metrics");
+  R.ok("raw > 48 jam -> 400", (await q("?bucket=raw&from=" + encodeURIComponent(new Date(Date.now() - 5 * 86_400_000).toISOString()))).status === 400);
+  R.ok("raw campur voltage + power -> 400", (await q("?bucket=raw&metrics=voltage,power")).status === 400);
+  R.ok("from >= to -> 400", (await q("?from=2026-09-21T10:00:00Z&to=2026-09-21T09:00:00Z")).status === 400);
+  const big = await q("?bucket=1m&metrics=voltage&from=" + encodeURIComponent(new Date(Date.now() - 30 * 86_400_000).toISOString()));
+  R.ok("rentang terlalu besar -> 400 dengan saran bucket & batas titik", big.status === 400 && /bucket=5m/.test(JSON.stringify(big.json)) && /20000/.test(JSON.stringify(big.json)), JSON.stringify(big.json).slice(0, 200));
+  R.ok("bucket tidak valid -> 400", (await q("?bucket=1d")).status === 400);
+
+  R.ok("viewer (collaborator) boleh membaca riwayat", (await q("", vt)).status === 200);
+  R.ok("orang asing -> 404 DEVICE_NOT_FOUND", (await q("", st)).json?.error?.code === "DEVICE_NOT_FOUND");
+  R.ok("tanpa token -> 401", (await call("GET", `/api/v1/devices/${A.id}/history`)).status === 401);
+
+  const etag = def.res.headers.get("etag")!;
+  R.ok("history mendukung ETag: If-None-Match sama -> 304", (await q("", ot, { "if-none-match": etag })).status === 304);
+}
+
 async function main() {
   let server: ReturnType<typeof spawnServer> | null = null;
   if (!process.env.SMOKE_BASE_URL) server = spawnServer(dbUrl, PORT);
   try {
     R.ok("server sehat (/api/health 200)", await waitHealth(BASE));
     await authSection();
-    await readSection();
+    const ctx = await readSection();
+    await historySection(ctx);
 
     // fail-fast: server menolak start tanpa JWT_ACCESS_SECRET (dijalankan terpisah, port lain)
     const bad = spawnSync("npx", ["tsx", "src/server.ts"], {

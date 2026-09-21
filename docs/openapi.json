@@ -732,6 +732,141 @@
           "maxCellDeltaMv",
           "generatedAt"
         ]
+      },
+      "HistoryResponse": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-09-21T08:15:00.000Z"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-09-21T08:15:00.000Z"
+          },
+          "bucket": {
+            "$ref": "#/components/schemas/HistoryBucket"
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HistorySeries"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Hanya untuk bucket=raw; null = habis."
+          }
+        },
+        "required": [
+          "deviceId",
+          "from",
+          "to",
+          "bucket",
+          "series",
+          "nextCursor"
+        ]
+      },
+      "HistoryBucket": {
+        "type": "string",
+        "enum": [
+          "raw",
+          "1m",
+          "5m",
+          "1h"
+        ]
+      },
+      "HistorySeries": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "pack",
+              "cell"
+            ]
+          },
+          "packIndex": {
+            "type": "integer"
+          },
+          "cellIndex": {
+            "type": "integer",
+            "nullable": true,
+            "description": "null untuk seri level pack."
+          },
+          "metric": {
+            "$ref": "#/components/schemas/HistoryMetric"
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "C",
+              "A",
+              "W",
+              "V"
+            ]
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HistoryPoint"
+            }
+          }
+        },
+        "required": [
+          "scope",
+          "packIndex",
+          "cellIndex",
+          "metric",
+          "unit",
+          "points"
+        ]
+      },
+      "HistoryMetric": {
+        "type": "string",
+        "enum": [
+          "temperature",
+          "current",
+          "power",
+          "voltage"
+        ]
+      },
+      "HistoryPoint": {
+        "type": "object",
+        "properties": {
+          "t": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-09-21T08:15:00.000Z",
+            "description": "Awal bucket (UTC). Untuk raw: waktu sampel."
+          },
+          "v": {
+            "type": "number",
+            "description": "Nilai (raw) atau rata-rata bucket."
+          },
+          "min": {
+            "type": "number",
+            "nullable": true,
+            "description": "Minimum bucket; null untuk raw."
+          },
+          "max": {
+            "type": "number",
+            "nullable": true,
+            "description": "Maksimum bucket; null untuk raw."
+          }
+        },
+        "required": [
+          "t",
+          "v",
+          "min",
+          "max"
+        ]
       }
     },
     "parameters": {}
@@ -1311,6 +1446,167 @@
           },
           "401": {
             "description": "UNAUTHORIZED: token hilang/kedaluwarsa/dicabut (atau kredensial salah)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL: kesalahan server (sertakan requestId saat melapor)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/history": {
+      "get": {
+        "tags": [
+          "Riwayat"
+        ],
+        "summary": "Riwayat telemetri (time-series)",
+        "description": "Seri per pack (`temperature` °C, `current` A, `power` W) atau per cell (`voltage` V). Default: 24 jam terakhir, bucket 5m, metrics temperature,current,power.\n\n- `bucket=raw`: sampel asli; rentang maks 48 jam; `voltage` tidak boleh digabung dengan metrik pack; halaman berikutnya lewat `nextCursor` → `?cursor=`.\n- `bucket=1m|5m|1h`: agregat (v = rata-rata, min, max) dihitung di database; total titik dibatasi ~20.000 (lebih dari itu → 400 VALIDATION_ERROR dengan saran bucket/rentang).\n- Data lebih tua dari 30 hari hanya ada sebagai agregat (rollup 1 menit), bucket tetap 1m/5m/1h.\n- Bucket tanpa sampel tidak muncul; titik null dibuang; `temperature` null (sensor error) tidak muncul sebagai titik.\nMendukung ETag/If-None-Match.",
+        "operationId": "getDeviceHistory",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "ID device (bukan serialNumber)."
+            },
+            "required": true,
+            "description": "ID device (bukan serialNumber).",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "ISO-8601 UTC; default = to − 24 jam."
+            },
+            "required": false,
+            "description": "ISO-8601 UTC; default = to − 24 jam.",
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "ISO-8601 UTC; default = sekarang."
+            },
+            "required": false,
+            "description": "ISO-8601 UTC; default = sekarang.",
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "$ref": "#/components/schemas/HistoryBucket"
+            },
+            "required": false,
+            "name": "bucket",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "CSV dari temperature,current,power,voltage. Default: temperature,current,power. `voltage` = per cell (banyak seri)."
+            },
+            "required": false,
+            "description": "CSV dari temperature,current,power,voltage. Default: temperature,current,power. `voltage` = per cell (banyak seri).",
+            "name": "metrics",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "nullable": true,
+              "minimum": 0,
+              "description": "Batasi ke satu pack."
+            },
+            "required": false,
+            "description": "Batasi ke satu pack.",
+            "name": "packIndex",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5000,
+              "description": "Hanya untuk raw: maks sampel per halaman (default 1000)."
+            },
+            "required": false,
+            "description": "Hanya untuk raw: maks sampel per halaman (default 1000).",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seri waktu",
+            "headers": {
+              "ETag": {
+                "description": "Validator. Kirim balik sebagai If-None-Match pada permintaan berikutnya.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryResponse"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Tidak berubah sejak ETag pada If-None-Match; tidak ada body. Pakai salinan lokal."
+          },
+          "400": {
+            "description": "VALIDATION_ERROR / INVALID_JSON: request tidak valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: token hilang/kedaluwarsa/dicabut (atau kredensial salah)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: resource tidak ada",
             "content": {
               "application/json": {
                 "schema": {
