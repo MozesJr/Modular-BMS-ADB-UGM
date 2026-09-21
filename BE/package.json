@@ -10,7 +10,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "mqtt:schema": "tsx scripts/gen-mqtt-schema.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
