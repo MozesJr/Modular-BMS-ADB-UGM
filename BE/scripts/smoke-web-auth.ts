@@ -139,6 +139,16 @@ async function main() {
     const session = await call(BASE, "GET", "/api/auth/session", { jar: good.jar });
     ok("GET /api/auth/session berisi user.email", session.json?.user?.email === email, JSON.stringify(session.json));
 
+    ok(
+      "GET /api/auth/session tidak boleh di-cache (Cache-Control no-store)",
+      /no-store/i.test(session.res.headers.get("cache-control") ?? ""),
+      String(session.res.headers.get("cache-control")),
+    );
+    const anonSession = await call(BASE, "GET", "/api/auth/session");
+    ok("session tanpa cookie -> null (bukan objek error yang truthy)", anonSession.json === null, JSON.stringify(anonSession.json));
+    const badBearer = await call(BASE, "GET", "/api/devices", { headers: { authorization: "Bearer %E0%A4%A" } });
+    ok("header Bearer rusak tidak membuat 500 -> 401", badBearer.status === 401, String(badBearer.status));
+
     const dev = await call(BASE, "GET", "/api/devices", { jar: good.jar });
     ok("route terproteksi dengan cookie -> 200", dev.status === 200 && Array.isArray(dev.json));
     const noCookie = await call(BASE, "GET", "/api/devices");
