@@ -1,0 +1,74 @@
+# CI — tidak men-deploy apa pun (deploy ada di deploy.yml). Berjalan di pull request dan push ke branch selain main.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: bmstest
+          POSTGRES_PASSWORD: bmstest
+          POSTGRES_DB: bms_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U bmstest -d bms_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: BE
+    env:
+      # DB sekali-pakai milik job ini; tes menolak apa pun selain localhost + nama bms_test*
+      TEST_DATABASE_URL: postgresql://bmstest:bmstest@localhost:5432/bms_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: BE/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Terapkan migrasi ke DB CI
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://bmstest:bmstest@localhost:5432/bms_test
+      - run: npx tsc --noEmit -p tsconfig.json
+      - run: npx tsc --noEmit -p tsconfig.server.json
+      - run: npm run lint
+      - run: npm test
+      - name: docs/openapi.json harus sinkron dengan kontrak
+        run: npm run openapi:check
+      - name: docs/mqtt-payload.schema.json harus sinkron
+        run: npm run mqtt:schema && git diff --exit-code -- ../docs/mqtt-payload.schema.json
+      - run: npm run build
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: FE
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: FE/package-lock.json
+      - run: npm ci --legacy-peer-deps
+      - run: npx tsc --noEmit
+      # ESLint FE belum dijadikan gerbang: ada utang lint pra-ada (react-hooks/set-state-in-effect dll).
+      - run: npm run build

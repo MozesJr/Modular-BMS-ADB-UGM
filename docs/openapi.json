@@ -1,0 +1,226 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Modular Universal BMS API",
+    "version": "1.0.0",
+    "description": "API backend untuk aplikasi mobile dan web. Panduan lengkap: docs/API-GUIDE.md.\n\nKonvensi: base path `/api/v1`; waktu ISO-8601 UTC; satuan ada di nama field (voltageV, currentA, powerW, temperatureC, cellDeltaMv);\nerror seragam `{ error: { code, message, details? }, requestId }`; tidak ada SoC/SoH (belum ada di payload perangkat)."
+  },
+  "servers": [
+    {
+      "url": "https://YOUR-HOST",
+      "description": "Ganti dengan origin publik backend (HTTPS wajib untuk build rilis mobile)"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Auth",
+      "description": "Token akses + refresh dengan rotasi"
+    },
+    {
+      "name": "Akun",
+      "description": "Profil user"
+    },
+    {
+      "name": "Device",
+      "description": "Daftar dan detail device, klaim, ubah nama, lepas/hapus"
+    },
+    {
+      "name": "Riwayat",
+      "description": "Time-series (raw atau agregat)"
+    },
+    {
+      "name": "Collaborator",
+      "description": "Berbagi akses device (viewer/editor)"
+    },
+    {
+      "name": "Dashboard",
+      "description": "Ringkasan lintas device"
+    },
+    {
+      "name": "Operasional",
+      "description": "Health check"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Access token dari POST /api/v1/auth/login atau /refresh."
+      }
+    },
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded",
+              "down",
+              "shutting_down"
+            ]
+          },
+          "uptimeSec": {
+            "type": "integer"
+          },
+          "db": {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              },
+              "latencyMs": {
+                "type": "integer",
+                "nullable": true
+              }
+            },
+            "required": [
+              "ok",
+              "latencyMs"
+            ]
+          },
+          "mqtt": {
+            "type": "object",
+            "properties": {
+              "connected": {
+                "type": "boolean"
+              },
+              "lastMessageAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time",
+                "example": "2026-09-21T08:15:00.000Z"
+              },
+              "lastMessageAgeSec": {
+                "type": "integer",
+                "nullable": true
+              }
+            },
+            "required": [
+              "connected",
+              "lastMessageAt",
+              "lastMessageAgeSec"
+            ]
+          },
+          "ingest": {
+            "type": "object",
+            "properties": {
+              "queueDepth": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "queueDepth"
+            ]
+          },
+          "counters": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "status",
+          "uptimeSec",
+          "db",
+          "mqtt",
+          "ingest",
+          "counters"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "DEVICE_NOT_FOUND",
+                "description": "Kode stabil untuk mesin; jangan mem-branch pada `message`."
+              },
+              "message": {
+                "type": "string",
+                "description": "Pesan untuk manusia (bahasa Indonesia)."
+              },
+              "details": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ErrorIssue"
+                },
+                "description": "Hanya untuk VALIDATION_ERROR: daftar isu per field."
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          },
+          "requestId": {
+            "type": "string",
+            "description": "Sama dengan header X-Request-Id; sertakan saat melaporkan masalah."
+          }
+        },
+        "required": [
+          "error",
+          "requestId"
+        ]
+      },
+      "ErrorIssue": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "message"
+        ]
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": [
+          "Operasional"
+        ],
+        "summary": "Health check",
+        "description": "Tanpa autentikasi. 200 untuk `ok`/`degraded`, 503 untuk `down`/`shutting_down`. Tidak berisi data sensitif. Bukan bagian dari versi API v1.",
+        "operationId": "getHealth",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "DB hidup (MQTT mungkin terputus = degraded)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "INTERNAL: kesalahan server (sertakan requestId saat melapor)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

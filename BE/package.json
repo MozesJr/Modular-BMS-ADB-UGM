@@ -15,12 +15,16 @@
     "test:db": "bash scripts/test-with-db.sh",
     "smoke:web": "bash scripts/with-test-db.sh npx tsx scripts/smoke-web-auth.ts",
     "smoke:web:fe": "bash scripts/smoke-web-with-fe.sh",
-    "smoke:container": "bash scripts/smoke-container.sh"
+    "smoke:container": "bash scripts/smoke-container.sh",
+    "openapi": "tsx scripts/gen-openapi.ts",
+    "openapi:check": "tsx scripts/gen-openapi.ts --check"
   },
   "dependencies": {
+    "@asteasolutions/zod-to-openapi": "^9.1.0",
     "@prisma/client": "^5.20.0",
     "bcryptjs": "^2.4.3",
     "dotenv": "^16.4.5",
+    "jose": "^6.2.12",
     "mqtt": "^5.10.1",
     "next": "^15.5.25",
     "next-auth": "^5.0.0-beta.32",

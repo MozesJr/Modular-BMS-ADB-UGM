@@ -38,8 +38,9 @@ export const err = {
   notFound: (message = "Data tidak ditemukan", code: ErrorCode = "NOT_FOUND") => new ApiError(404, code, message),
   badRequest: (message: string, details?: unknown) => new ApiError(400, "VALIDATION_ERROR", message, details),
   conflict: (message: string, code: ErrorCode = "CONFLICT") => new ApiError(409, code, message),
+  // Lama tunggu HANYA di header Retry-After (details selalu berupa daftar isu validasi, lihat ErrorResponse di OpenAPI).
   tooMany: (retryAfterSec: number, message = "Terlalu banyak percobaan. Coba lagi nanti.") =>
-    new ApiError(429, "RATE_LIMITED", message, { retryAfterSec }, { "Retry-After": String(Math.max(1, retryAfterSec)) }),
+    new ApiError(429, "RATE_LIMITED", message, undefined, { "Retry-After": String(Math.max(1, retryAfterSec)) }),
 };
 
 const REQUEST_ID_RE = /^[A-Za-z0-9._-]{8,64}$/;
