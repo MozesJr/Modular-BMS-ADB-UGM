@@ -47,22 +47,37 @@ export default function DeviceList() {
     e.preventDefault();
     setFormError(null);
 
-    if (!newSerialNumber.trim()) {
+    const serial = newSerialNumber.trim();
+    const name = newName.trim();
+
+    if (!serial) {
       setFormError("Device ID / Serial Number wajib diisi.");
+      return;
+    }
+    // Format ID: huruf/angka di awal, lalu huruf/angka/-/_ ; minimal 4 karakter.
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{3,}$/.test(serial)) {
+      setFormError(
+        "Device ID minimal 4 karakter, diawali huruf/angka, hanya boleh huruf, angka, titik, strip, atau garis bawah.",
+      );
+      return;
+    }
+    // Keunikan dicek final oleh backend (respons 409); ini hanya validasi bentuk.
+    if (name && name.length < 3) {
+      setFormError("Nama label minimal 3 karakter (atau kosongkan).");
       return;
     }
 
     setIsSubmitting(true);
     try {
       await api.post("/devices", {
-        serialNumber: newSerialNumber.trim(),
-        name: newName.trim() || undefined,
+        serialNumber: serial,
+        name: name || undefined,
       });
       setNewSerialNumber("");
       setNewName("");
       closeModal();
       await loadDevices();
-      alertSuccess("Device ditambahkan", `Device "${newSerialNumber.trim()}" berhasil didaftarkan.`);
+      alertSuccess("Device ditambahkan", `Device "${serial}" berhasil didaftarkan.`);
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Gagal menambahkan device.";
       setFormError(message);
