@@ -16,6 +16,10 @@ const DEFAULT_HOURS = 24;
 const MAX_HOURS = 24 * 30;
 const MIN_BUCKET_S = 10;
 const MAX_BUCKET_S = 3600;
+// Interval sampling firmware (~10s). Jarak antar sampel > 2x ini dianggap gap (offline) dan
+// tidak dihitung sebagai energi.
+const SAMPLING_INTERVAL_S = 10;
+const ENERGY_GAP_S = 2 * SAMPLING_INTERVAL_S;
 
 function autoBucketSeconds(hours: number): number {
   if (hours <= 6) return 30;
@@ -43,6 +47,11 @@ type CellPerRow = {
   packIndex: number;
   cellIndex: number;
   vavg: number;
+};
+type EnergyRow = {
+  bucket: Date;
+  packIndex: number;
+  energywh: number | null;
 };
 
 type HistoryBucket = {
@@ -101,7 +110,7 @@ export async function GET(
   const from = new Date(Date.now() - hours * 60 * 60 * 1000);
   const bucketInterval = Prisma.sql`make_interval(secs => ${bucketSeconds})`;
 
-  const [cellAgg, tempAgg, cellPer] = await Promise.all([
+  const [cellAgg, tempAgg, cellPer, energyAgg] = await Promise.all([
     prisma.$queryRaw<CellAggRow[]>`
       SELECT date_bin(${bucketInterval}, "recordedAt", ${from}) AS bucket,
              "packIndex",
@@ -134,6 +143,34 @@ export async function GET(
           GROUP BY bucket, "packIndex", "cellIndex"
           ORDER BY bucket ASC`
       : Promise.resolve<CellPerRow[]>([]),
+    // Energi (Wh) via integrasi trapezoid daya terhadap recordedAt antar sampel berurutan.
+    // Segmen dengan jarak antar sampel > 2x interval (gap offline) diabaikan. Kontribusi tiap
+    // segmen diatribusikan ke bucket sampel akhir (recordedAt terbaru dari pasangan).
+    prisma.$queryRaw<EnergyRow[]>`
+      WITH rows AS (
+        SELECT
+          "packIndex",
+          "recordedAt",
+          "power",
+          date_bin(${bucketInterval}, "recordedAt", ${from}) AS bucket,
+          lag("power") OVER w AS prev_power,
+          lag("recordedAt") OVER w AS prev_t
+        FROM "PackHistory"
+        WHERE "deviceId" = ${id} AND "recordedAt" >= ${from}
+        WINDOW w AS (PARTITION BY "packIndex" ORDER BY "recordedAt")
+      )
+      SELECT bucket, "packIndex",
+        SUM(
+          CASE
+            WHEN prev_t IS NULL THEN 0
+            WHEN "power" IS NULL OR prev_power IS NULL THEN 0
+            WHEN EXTRACT(EPOCH FROM ("recordedAt" - prev_t)) > ${ENERGY_GAP_S} THEN 0
+            ELSE ("power" + prev_power) / 2.0 * EXTRACT(EPOCH FROM ("recordedAt" - prev_t)) / 3600.0
+          END
+        ) AS energywh
+      FROM rows
+      GROUP BY bucket, "packIndex"
+      ORDER BY bucket ASC`,
   ]);
 
   // Gabung agregasi cell + temp per (packIndex, bucket).
@@ -186,9 +223,12 @@ export async function GET(
     b.tempAvg = row.tempavg;
     b.currentAvg = row.currentavg;
     b.powerAvg = row.poweravg;
-    // Energi (Wh) dalam bucket: avg daya (W) × durasi bucket (detik) / 3600.
-    b.energyWh = row.poweravg != null ? (row.poweravg * bucketSeconds) / 3600 : null;
     b.balancerOn = row.balanceron;
+  }
+  for (const row of energyAgg) {
+    const t = row.bucket.toISOString();
+    const b = bucket(pack(row.packIndex), t);
+    b.energyWh = row.energywh;
   }
   for (const row of cellPer) {
     const p = pack(row.packIndex);

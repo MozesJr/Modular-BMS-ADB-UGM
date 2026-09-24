@@ -133,6 +133,17 @@ export function cellDeviationsMv(
   }));
 }
 
+// Skala warna divergen deviasi (mV): biru = di bawah mean, merah = di atas mean, netral ~0.
+// Lightness ikut berubah (bukan hue saja) demi aksesibilitas. Dipakai twin & mini cell-strip.
+export function deviationColor(devMv: number, maxDev = 50): string {
+  const t = Math.max(-1, Math.min(1, devMv / maxDev));
+  const mag = Math.abs(t);
+  const hue = t >= 0 ? 8 : 212; // merah vs biru
+  const sat = 18 + mag * 62; // 18%..80%
+  const light = 80 - mag * 34; // 80%..46%
+  return `hsl(${hue} ${sat}% ${light}%)`;
+}
+
 // Arah arus: current negatif = charging (kontrak sensor ACS712). |I| ~ 0 dianggap idle.
 export const CURRENT_IDLE_THRESHOLD_A = 0.05;
 

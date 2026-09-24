@@ -1,20 +1,8 @@
 "use client";
 import { useId, useState, type CSSProperties } from "react";
-import { deriveCellStats, cellDeviationsMv, currentDirection, type CellReading } from "@/lib/packMetrics";
+import { deriveCellStats, cellDeviationsMv, currentDirection, deviationColor, type CellReading } from "@/lib/packMetrics";
 import type { Freshness } from "@/lib/freshness";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
-
-// Skala divergen deviasi (mV): biru = di bawah mean, merah = di atas mean, netral di ~0.
-// Lightness ikut berubah (bukan hue saja) demi keterbacaan & aksesibilitas.
-function deviationColor(devMv: number): string {
-  const maxDev = 50; // mV — batas critical
-  const t = Math.max(-1, Math.min(1, devMv / maxDev));
-  const mag = Math.abs(t);
-  const hue = t >= 0 ? 8 : 212; // merah vs biru
-  const sat = 18 + mag * 62; // 18%..80%
-  const light = 80 - mag * 34; // 80%..46% — kontras naik seiring deviasi
-  return `hsl(${hue} ${sat}% ${light}%)`;
-}
 
 const W = 340;
 const H = 176;
