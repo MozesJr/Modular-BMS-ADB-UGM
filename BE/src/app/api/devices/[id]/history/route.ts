@@ -51,7 +51,9 @@ type CellPerRow = {
 type EnergyRow = {
   bucket: Date;
   packIndex: number;
-  energywh: number | null;
+  energywh: number | null; // net (signed; negatif = net charging)
+  energyinwh: number | null; // charge (positif)
+  energyoutwh: number | null; // discharge (positif)
 };
 
 type HistoryBucket = {
@@ -63,7 +65,9 @@ type HistoryBucket = {
   tempAvg: number | null;
   currentAvg: number | null;
   powerAvg: number | null;
-  energyWh: number | null; // integral daya dalam bucket: avg power × durasi bucket / 3600
+  energyWh: number | null; // net (signed) — kompatibilitas
+  energyInWh: number | null; // charge (positif)
+  energyOutWh: number | null; // discharge (positif)
   balancerOn: boolean;
 };
 
@@ -158,17 +162,22 @@ export async function GET(
         FROM "PackHistory"
         WHERE "deviceId" = ${id} AND "recordedAt" >= ${from}
         WINDOW w AS (PARTITION BY "packIndex" ORDER BY "recordedAt")
-      )
-      SELECT bucket, "packIndex",
-        SUM(
+      ),
+      seg AS (
+        SELECT bucket, "packIndex",
           CASE
             WHEN prev_t IS NULL THEN 0
             WHEN "power" IS NULL OR prev_power IS NULL THEN 0
             WHEN EXTRACT(EPOCH FROM ("recordedAt" - prev_t)) > ${ENERGY_GAP_S} THEN 0
             ELSE ("power" + prev_power) / 2.0 * EXTRACT(EPOCH FROM ("recordedAt" - prev_t)) / 3600.0
-          END
-        ) AS energywh
-      FROM rows
+          END AS contribution
+        FROM rows
+      )
+      SELECT bucket, "packIndex",
+        SUM(contribution) AS energywh,
+        SUM(CASE WHEN contribution < 0 THEN -contribution ELSE 0 END) AS energyinwh,
+        SUM(CASE WHEN contribution > 0 THEN contribution ELSE 0 END) AS energyoutwh
+      FROM seg
       GROUP BY bucket, "packIndex"
       ORDER BY bucket ASC`,
   ]);
@@ -202,6 +211,8 @@ export async function GET(
         currentAvg: null,
         powerAvg: null,
         energyWh: null,
+        energyInWh: null,
+        energyOutWh: null,
         balancerOn: false,
       };
       p.buckets.set(t, b);
@@ -229,6 +240,8 @@ export async function GET(
     const t = row.bucket.toISOString();
     const b = bucket(pack(row.packIndex), t);
     b.energyWh = row.energywh;
+    b.energyInWh = row.energyinwh;
+    b.energyOutWh = row.energyoutwh;
   }
   for (const row of cellPer) {
     const p = pack(row.packIndex);

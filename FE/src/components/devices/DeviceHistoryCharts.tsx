@@ -168,6 +168,11 @@ export default function DeviceHistoryCharts({ deviceId }: { deviceId: string }) 
   const currentLine = lineFrom(buckets, "currentAvg", gapMs);
   const hasPower = powerLine.some((p) => p.y != null) || currentLine.some((p) => p.y != null);
 
+  // Energi terintegrasi (trapezoid) sepanjang rentang untuk pack terpilih.
+  const energyInWh = buckets.reduce((s, b) => s + (b.energyInWh ?? 0), 0);
+  const energyOutWh = buckets.reduce((s, b) => s + (b.energyOutWh ?? 0), 0);
+  const energyNetWh = energyOutWh - energyInWh;
+
   const hasData = (history?.packs.length ?? 0) > 0;
 
   // --- Opsi chart voltage (envelope) ---
@@ -335,7 +340,16 @@ export default function DeviceHistoryCharts({ deviceId }: { deviceId: string }) 
 
             {/* POWER & CURRENT */}
             <div className="p-4 rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/20">
-              <h4 className="text-sm font-bold text-gray-700 dark:text-white/90 mb-3">Daya &amp; Arus — Pack #{selectedPackIndex ?? "—"}</h4>
+              <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
+                <h4 className="text-sm font-bold text-gray-700 dark:text-white/90">Daya &amp; Arus — Pack #{selectedPackIndex ?? "—"}</h4>
+                {hasPower && (
+                  <div className="flex items-center gap-3 text-xs tabular-nums">
+                    <span className="text-emerald-600 dark:text-emerald-400">Charge {energyInWh.toFixed(1)} Wh</span>
+                    <span className="text-amber-600 dark:text-amber-400">Discharge {energyOutWh.toFixed(1)} Wh</span>
+                    <span className="text-gray-500 dark:text-gray-400">Net {energyNetWh >= 0 ? "+" : ""}{energyNetWh.toFixed(1)} Wh</span>
+                  </div>
+                )}
+              </div>
               {hasPower ? (
                 <div className="max-w-full overflow-x-auto custom-scrollbar">
                   <div className="min-w-[700px]">

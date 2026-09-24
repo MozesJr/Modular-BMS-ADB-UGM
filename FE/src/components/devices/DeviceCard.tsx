@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import Badge from "@/components/ui/badge/Badge";
-import type { Device } from "@/types/device";
+import type { Device, DeviceSparkPoint } from "@/types/device";
 import { getFreshness, formatAge, FRESHNESS_META } from "@/lib/freshness";
 import { deriveCellStats, estimateSocPercent, cellDeviationsMv, deviationColor } from "@/lib/packMetrics";
 import { computeHealthScore } from "@/lib/healthScore";
@@ -43,6 +43,55 @@ export function deviceSummary(device: Device, nowMs: number) {
   return { freshness, packs, snaps, health, alarms, soc, totalPower, cellCount, worstDelta };
 }
 
+// Sparkline SVG kecil (tanpa lib). Memutus garis saat gap bucket (jarak waktu > 2× spacing minimum).
+function Sparkline({ spark }: { spark: DeviceSparkPoint[] }) {
+  const usePower = spark.some((p) => p.powerW != null);
+  const pts = spark
+    .map((p) => ({ t: new Date(p.t).getTime(), v: usePower ? p.powerW : p.deltaMv }))
+    .filter((p) => Number.isFinite(p.t));
+  const valid = pts.filter((p): p is { t: number; v: number } => p.v != null);
+  if (valid.length < 2) return null;
+
+  const W = 100;
+  const H = 28;
+  const xs = valid.map((p) => p.t);
+  const vs = valid.map((p) => p.v);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minV = Math.min(...vs);
+  const maxV = Math.max(...vs);
+  const spanX = maxX - minX || 1;
+  const spanV = maxV - minV || 1;
+  // Gap threshold = 2× spacing minimum antar titik valid.
+  let minGap = Infinity;
+  for (let i = 1; i < valid.length; i++) minGap = Math.min(minGap, valid[i].t - valid[i - 1].t);
+  const gapMs = (Number.isFinite(minGap) ? minGap : spanX) * 2.5;
+
+  const x = (t: number) => ((t - minX) / spanX) * W;
+  const y = (v: number) => H - 2 - ((v - minV) / spanV) * (H - 4);
+
+  const segments: string[] = [];
+  let cur: string[] = [];
+  for (let i = 0; i < valid.length; i++) {
+    if (i > 0 && valid[i].t - valid[i - 1].t > gapMs) {
+      if (cur.length) segments.push(cur.join(" "));
+      cur = [];
+    }
+    cur.push(`${x(valid[i].t).toFixed(1)},${y(valid[i].v).toFixed(1)}`);
+  }
+  if (cur.length) segments.push(cur.join(" "));
+
+  return (
+    <div title={usePower ? "Daya 6 jam (W)" : "Delta cell 6 jam (mV)"}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-7" preserveAspectRatio="none" aria-hidden>
+        {segments.map((pts2, i) => (
+          <polyline key={i} points={pts2} fill="none" stroke="#465fff" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        ))}
+      </svg>
+    </div>
+  );
+}
+
 function CellStrip({ cells }: { cells: { index: number; voltage: number }[] }) {
   const devs = cellDeviationsMv(cells);
   if (devs.length === 0) return null;
@@ -64,10 +113,12 @@ export default function DeviceCard({
   device,
   variant = "compact",
   nowMs = Date.now(),
+  spark,
 }: {
   device: Device;
   variant?: "compact" | "detailed";
   nowMs?: number;
+  spark?: DeviceSparkPoint[];
 }) {
   const [copied, setCopied] = useState(false);
   const { freshness, packs, health, alarms, soc, cellCount, worstDelta } = deviceSummary(device, nowMs);
@@ -124,6 +175,13 @@ export default function DeviceCard({
           <span className="text-[10px] text-gray-400">+{packs.length - 1} pack lain</span>
         )}
       </div>
+
+      {/* Sparkline 6 jam (delta/power) — hanya bila data summary tersedia */}
+      {spark && spark.length > 1 && (
+        <div className="mb-3">
+          <Sparkline spark={spark} />
+        </div>
+      )}
 
       {/* Metrics row */}
       <div className="grid grid-cols-3 gap-2 mb-3 text-center">

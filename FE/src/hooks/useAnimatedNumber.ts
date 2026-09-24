@@ -22,6 +22,17 @@ export function useAnimatedNumber(value: number | null, durationMs = DURATION_MS
       return;
     }
 
+    // Hormati prefers-reduced-motion: langsung ke nilai akhir tanpa animasi.
+    const reduced =
+      typeof window !== "undefined" &&
+      window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) {
+      currentRef.current = value;
+      setDisplayValue(value);
+      return;
+    }
+
     const from = currentRef.current ?? value;
     if (from === value) {
       currentRef.current = value;

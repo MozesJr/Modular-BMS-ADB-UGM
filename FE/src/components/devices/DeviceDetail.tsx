@@ -23,6 +23,9 @@ import HealthRing from "@/components/devices/HealthRing";
 import AlarmTimeline from "@/components/devices/AlarmTimeline";
 import { computeHealthScore } from "@/lib/healthScore";
 import { evaluateSnapshot, evaluateHistoryEpisodes } from "@/lib/alertRules";
+import Link from "next/link";
+import { Skeleton } from "@/components/common/Skeleton";
+import ErrorState from "@/components/common/ErrorState";
 
 const ALARM_HISTORY_HOURS = 24;
 
@@ -73,6 +76,7 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
   const [device, setDevice] = useState<Device | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [lastUpdateAt, setLastUpdateAt] = useState<Date | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const { history: alarmHistory } = useDeviceHistory(deviceId, ALARM_HISTORY_HOURS);
@@ -89,11 +93,13 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
   async function loadDevice(options?: { silent?: boolean }) {
     if (!options?.silent) setIsLoading(true);
     setError(null);
+    setErrorStatus(null);
     try {
       const data = await api.get<Device>(`/devices/${deviceId}`);
       setDevice(data);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Gagal memuat device.");
+      setErrorStatus(err instanceof ApiError ? err.status : null);
     } finally {
       if (!options?.silent) setIsLoading(false);
     }
@@ -224,15 +230,36 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
   }
 
   if (isLoading) {
-    return <div className="p-8 text-center text-sm text-gray-500">Memuat telemetri device...</div>;
+    return (
+      <div className="space-y-6">
+        <div className="rounded-2xl border border-gray-200 dark:border-gray-800 p-6 bg-white dark:bg-white/[0.03] space-y-3">
+          <Skeleton className="h-6 w-64" />
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-4 w-52" />
+        </div>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <Skeleton className="h-72" />
+          <Skeleton className="h-72" />
+        </div>
+      </div>
+    );
+  }
+
+  // 404 / 403 — device tidak ditemukan atau tidak punya akses.
+  if (errorStatus === 404 || errorStatus === 403 || (!device && !error)) {
+    return (
+      <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-white/[0.03] p-12 text-center">
+        <h3 className="text-lg font-bold text-gray-900 dark:text-white">Device tidak ditemukan</h3>
+        <p className="mt-1 text-sm text-gray-500">Device ini tidak ada atau kamu tidak punya akses.</p>
+        <Link href="/devices" className="inline-block mt-4 rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600">
+          ← Kembali ke My Devices
+        </Link>
+      </div>
+    );
   }
 
   if (error || !device) {
-    return (
-      <div className="rounded-xl bg-red-50 p-4 text-sm text-red-600 dark:bg-red-500/10 dark:text-red-400">
-        {error ?? "Device tidak ditemukan."}
-      </div>
-    );
+    return <ErrorState message={error ?? "Gagal memuat device."} onRetry={() => loadDevice()} />;
   }
 
   return (

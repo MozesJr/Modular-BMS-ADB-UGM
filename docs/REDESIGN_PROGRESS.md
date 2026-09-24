@@ -3,7 +3,7 @@
 Branch kerja: **`feat/ui-redesign`** (jangan push ke `main`; push memicu CI/CD auto-deploy).
 Commit per fase: `fase-a`, `fase-a5`, `fase-b`, `fase-c-d`.
 
-> Diperbarui di akhir tiap fase. Terakhir: Fase C + D.
+> Diperbarui di akhir tiap fase. Terakhir: Fase E (polish & hardening).
 
 ---
 
@@ -39,18 +39,35 @@ Bucket auto: `≤6h→30s`, `≤24h→120s`, else `900s` (7 hari). Override `buc
       "t": "ISO",
       "cellMin": 3.31, "cellMax": 3.36, "cellAvg": 3.34, "deltaMv": 50,
       "tempAvg": 27.4, "currentAvg": -1.2, "powerAvg": -60.5,
-      "energyWh": -2.1, "balancerOn": true
+      "energyWh": -2.1, "energyInWh": 3.0, "energyOutWh": 0.9, "balancerOn": true
     }],
     "cells": [{ "index": 1, "points": [{ "t": "ISO", "vAvg": 3.34 }] }] // hanya jika cells=1
   }]
 }
 ```
 
-**`energyWh` (integrasi trapezoid):** untuk tiap pasangan sampel berurutan (`prev`,`curr`) dalam satu pack,
-kontribusi = `((power_curr + power_prev) / 2) × Δt_detik / 3600`, dengan `Δt = recordedAt_curr − recordedAt_prev`.
-Segmen dengan `Δt > 2× interval (20s)` dianggap **gap offline** dan diabaikan (kontribusi 0). Segmen
-diatribusikan ke bucket sampel akhir. Jadi energi hanya terhitung dari durasi yang benar-benar terisi data
-(bukan durasi bucket penuh). Sumber: `PackHistory.power` (kolom `current`/`power` ditambahkan di fase-a5/approval).
+**Energi (integrasi trapezoid):** untuk tiap pasangan sampel berurutan (`prev`,`curr`) dalam satu pack,
+kontribusi = `((power_curr + power_prev) / 2) × Δt_detik / 3600`, `Δt = recordedAt_curr − recordedAt_prev`.
+Segmen dengan `Δt > 2× interval (20s)` = **gap offline**, diabaikan (kontribusi 0); diatribusikan ke bucket sampel akhir.
+- `energyWh` = jumlah kontribusi (**net, bertanda**; negatif = net charging) — kompatibilitas.
+- `energyInWh` = Σ |kontribusi negatif| (charge, **positif**).
+- `energyOutWh` = Σ kontribusi positif (discharge, **positif**).
+Jadi energi hanya dari durasi yang benar-benar terisi (bukan durasi bucket penuh). Sumber: `PackHistory.power`.
+
+## 2b. Kontrak `GET /api/devices/summary?hours=6`
+
+Akses **identik** dengan `GET /api/devices` (owner ATAU collaborator) — diverifikasi dengan 2 user (A owner semua, B collaborator 1 device → B hanya melihat 1). Bucket dipilih agar ≤ ~60 titik/device. 2 query GROUP BY (delta cell dari CellHistory, avg power dari PackHistory) + 1 query metadata — **bukan N query**.
+```jsonc
+{
+  "hours": 6, "bucketSeconds": 360,
+  "devices": [{
+    "id": "...", "serialNumber": "...", "name": "...", "verified": true, "lastSeen": "ISO",
+    "packCount": 2, "cellCount": 8,
+    "spark": [{ "t": "ISO", "deltaMv": 15, "powerW": -60.5 }]  // downsampled; powerW = packCount × avg(power)
+  }]
+}
+```
+DeviceCard merender sparkline SVG kecil (tanpa lib), gap saat bucket kosong.
 
 ## 3. Util bersama (FE) + konstanta
 
@@ -62,9 +79,11 @@ diatribusikan ke bucket sampel akhir. Jadi energi hanya terhitung dari durasi ya
 | `lib/alertRules.ts` | `evaluateSnapshot`, `evaluateHistoryEpisodes`, `ALARM_LABELS` | `ALERT_THRESHOLDS`: OV `3.65`, UV `2.50`, temp `45`, imbalance warn `20` / crit `50` mV |
 | `lib/healthScore.ts` | `computeHealthScore`, `healthColor`, `healthFormula` | bobot `balance 0.4 / suhu 0.3 / freshness 0.3`; balance 0 di delta ≥100 mV; suhu ideal 15–35 °C |
 | `lib/realtimeMerge.ts` | `applyRealtimeUpdate` | merge event WS `bms:update` ke `Device` (dipakai DeviceDetail, FleetDashboard, DeviceList) |
+| `context/WsContext.tsx` | `WsProvider`, `useWsStatus`, `useBmsSocket` | **SATU** koneksi WS untuk seluruh app + status global (connecting/connected/disconnected) |
 
-Komponen bersama: `DeviceCard` (varian `compact` = Dashboard, `detailed` = My Devices) + `deviceSummary()`.
+Komponen bersama: `DeviceCard` (varian `compact` = Dashboard, `detailed` = My Devices) + `deviceSummary()` + `Sparkline`.
 `BatteryTwin`, `Heartbeat`, `HealthRing`, `CellBalanceChart`, `AlarmTimeline` (Device Detail).
+Polish: `CommandPalette` (⌘K), `WsIndicator`, `Skeleton`/`CardGridSkeleton`, `ErrorState` (retry).
 
 ## 4. Stack dev lokal (opsional — tidak menyentuh prod)
 
@@ -98,12 +117,52 @@ Device auto-provisioned `ownerId=null` → klaim lewat POST `/api/devices` (atau
 | B | Device Detail: twin, heartbeat, cell balance, envelope, alarm, health | ✅ |
 | C | Dashboard fleet (KPI nyata, DeviceCard, hapus dummy) | ✅ |
 | D | My Devices (DeviceCard detailed, filter/search/sort) | ✅ |
+| E | Polish & hardening (command palette, skeleton, error/retry, 404, WS indicator, energy in/out, summary endpoint + sparkline, hapus template cruft) | ✅ |
+
+## 5b. Fase E — detail
+- **Command palette** ⌘K/Ctrl+K (`CommandPalette`): lompat device (nama/ID), halaman, toggle tema. Keyboard-first (↑↓/↵/esc), fokus dikembalikan, satu global keydown (⌘K, preventDefault).
+- **Skeleton** (Dashboard/My Devices/Device Detail) + **ErrorState** dengan tombol retry + **404** (device tak ada / tak punya akses).
+- **WS indicator** global di header dari `useWsStatus` (koneksi WS kini singleton via `WsProvider`).
+- Angka live `tabular-nums` + `useAnimatedNumber` menghormati `prefers-reduced-motion`.
+- **Template TailAdmin dihapus** (lihat §7).
 
 ## 6. TODO terbuka
 
 - [ ] **Apply migration `20260924190000_packhistory_current_power` ke DB VPS** (user handle). `/history` 500 sampai kolom ada.
-- [ ] **Proposal endpoint agregat** `GET /api/devices/summary?hours=6` untuk sparkline banyak device di Dashboard (delta/power per device, downsampled). Shape diusulkan sebelum implementasi — **belum dibuat** agar tak N-request.
 - [ ] Verifikasi duplikasi `PackHistory` (dev+prod subscribe broker sama) — query tertunda (tunnel putus). Gunakan stack lokal agar dev berhenti menulis ke prod.
 - [ ] Kalibrasi `LIFEPO4_OCV_SOC` dari data sel asli.
 - [ ] Opsional: alarm persistence backend (timeline lintas reload) — kini FE-only.
-- [ ] Command palette ⌘K untuk lompat ke device (opsional, Fase E/polish).
+- [ ] **Merge** dengan `feat/mobile-api-v1` — lihat §8 (rekonsiliasi migration telemetry & `client.ts` & `history/route.ts`).
+- [ ] **CI belum menjalankan `prisma migrate deploy`** — lihat §9.
+
+## 7. Template TailAdmin dihapus (Fase E)
+Route demo (tak dipakai, hanya di sidebar yang di-comment): `/bar-chart`, `/line-chart`, `/form-elements`, `/basic-tables`, `/blank`, `/calendar`, `/alerts`, `/avatars`, `/badge`, `/buttons`, `/images`, `/modals`, `/videos`. **`/profile` DIPERTAHANKAN** (dipakai UserDropdown).
+Komponen demo (0 importer setelah route dihapus): `components/ecommerce/*`, `components/charts/*`, `components/example/*`, `components/videos/*`, `components/calendar/*`, `components/form/form-elements/*`, `components/ui/video/*`, `components/ui/images/*`, `components/tables/*` (BasicTableOne, Pagination), `components/common/{ChartTab,PageBreadCrumb,ComponentCard}.tsx`, `components/form/MultiSelect.tsx`.
+Dipertahankan (masih dipakai): `common/GridShape` (auth/error), `form/date-picker`, semua `ui/{badge,button,dropdown,modal,table,alert,avatar}`, `user-profile/*`, `form/input/*`.
+
+## 8. Persiapan merge: `feat/ui-redesign` ↔ `feat/mobile-api-v1`
+**File bentrok** (diubah di kedua branch): `schema.prisma`, `mqtt/client.ts`, `server.ts`, `app/api/devices/[id]/history/route.ts`, `app/api/devices/{route,[id]/route}.ts`, `types/device.ts`, `PackCard.tsx`, `page.tsx`, `package.json`, `Dockerfile`, env examples, `.gitignore`, + 5 `Bms*` dummy (delete/modify: ui-redesign menghapus, mobile-api-v1 mengubah).
+**Migration tumpang tindih (KRITIS):** mobile-api-v1 punya `20260921140000_history_current_power_and_indexes` (sudah menambah `PackHistory.current/power` + index) dan `20260921130000_ingestion_idempotency` + `20260922110000_add_history_rollups`. ui-redesign punya `20260924180000_telemetry_perf_and_lastseen` + `20260924190000_packhistory_current_power`. → **`packhistory_current_power` akan gagal** (kolom sudah ada) bila kedua branch digabung apa adanya.
+**Rekomendasi:** merge/rebase **`feat/mobile-api-v1` dulu** (fondasi auth + idempotency), lalu rebase `feat/ui-redesign` di atasnya sambil: (a) **hapus** `packhistory_current_power` (redundan) & dedupe index di `telemetry_perf_and_lastseen` (sisakan hanya `lastSeen` + index yang belum ada, pakai `IF NOT EXISTS`); (b) merge manual `client.ts` (idempotency mobile + perf ui) & `history/route.ts` (rollups mobile + date_bin/energy ui); (c) `lastSeen` unik milik ui-redesign — pertahankan. `ingestion_idempotency` (unique constraint history) juga **menyelesaikan** TODO duplikasi.
+
+## 9. Checklist deploy
+- **CI `deploy.yml` TIDAK menjalankan `prisma migrate deploy`** (hanya `git pull` + `docker compose up --build`). Usul (jangan commit dulu) — tambah langkah setelah `up`:
+  ```yaml
+              docker compose up -d --build
+  +           docker compose exec -T backend npx prisma migrate deploy
+              docker image prune -f
+  ```
+  (atau jadikan entrypoint container: `prisma migrate deploy && node dist/server.js`; pastikan `prisma` CLI ada di image).
+- **Env baru di VPS:** `NEXT_PUBLIC_WS_URL=wss://<domain>/ws` (FE, saat build), pool params di `DATABASE_URL` (`?...&connection_limit=10&pool_timeout=20&connect_timeout=10`).
+- **Nginx/Cloudflare Tunnel:** proxy upgrade WebSocket di path `/ws` ke backend:4000 —
+  ```nginx
+  location /ws {
+    proxy_pass http://backend:4000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 3600s;
+  }
+  ```
+  (Cloudflare Tunnel: aktifkan WebSocket; pastikan `wss://` di FE.)

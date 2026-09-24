@@ -60,7 +60,9 @@ export type HistoryBucket = {
   tempAvg: number | null;
   currentAvg: number | null;
   powerAvg: number | null;
-  energyWh: number | null;
+  energyWh: number | null; // net (signed)
+  energyInWh: number | null; // charge (positif)
+  energyOutWh: number | null; // discharge (positif)
   balancerOn: boolean;
 };
 
@@ -83,6 +85,20 @@ export type DeviceHistory = {
   bucketSeconds: number;
   packs: PackHistorySeries[];
 };
+
+// --- Ringkasan fleet (GET /api/devices/summary) ---
+export type DeviceSparkPoint = { t: string; deltaMv: number | null; powerW: number | null };
+export type DeviceSummaryItem = {
+  id: string;
+  serialNumber: string;
+  name: string | null;
+  verified: boolean;
+  lastSeen: string | null;
+  packCount: number;
+  cellCount: number;
+  spark: DeviceSparkPoint[];
+};
+export type DevicesSummary = { hours: number; bucketSeconds: number; devices: DeviceSummaryItem[] };
 
 // --- Real-time (payload event "bms:update" lewat WS /ws) ---
 export type BmsUpdatePayload = {

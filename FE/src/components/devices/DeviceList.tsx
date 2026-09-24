@@ -12,6 +12,8 @@ import { useBmsSocket } from "@/hooks/useBmsSocket";
 import { applyRealtimeUpdate } from "@/lib/realtimeMerge";
 import DeviceCard, { deviceSummary } from "@/components/devices/DeviceCard";
 import type { Freshness } from "@/lib/freshness";
+import { CardGridSkeleton } from "@/components/common/Skeleton";
+import ErrorState from "@/components/common/ErrorState";
 
 type StatusFilter = "all" | Freshness;
 type VerifyFilter = "all" | "verified" | "pending";
@@ -156,8 +158,8 @@ export default function DeviceList() {
         </div>
       )}
 
-      {isLoading && <p className="text-sm text-gray-500 py-8 text-center">Memuat daftar device...</p>}
-      {error && <div className="rounded-xl bg-red-50 p-4 text-sm text-red-600 mb-4">{error}</div>}
+      {isLoading && <CardGridSkeleton count={6} />}
+      {error && !isLoading && <ErrorState message={error} onRetry={loadDevices} className="mb-4" />}
 
       {!isLoading && !error && devices.length === 0 && (
         <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 px-6 py-14 text-center bg-gray-50/50 dark:bg-white/[0.02]">

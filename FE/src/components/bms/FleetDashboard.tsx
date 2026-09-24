@@ -2,10 +2,12 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
-import type { Device } from "@/types/device";
+import type { Device, DevicesSummary, DeviceSparkPoint } from "@/types/device";
 import { useBmsSocket } from "@/hooks/useBmsSocket";
 import { applyRealtimeUpdate } from "@/lib/realtimeMerge";
 import DeviceCard, { deviceSummary } from "@/components/devices/DeviceCard";
+import { CardGridSkeleton, Skeleton } from "@/components/common/Skeleton";
+import ErrorState from "@/components/common/ErrorState";
 
 function Kpi({ label, value, sub, tone = "default" }: { label: string; value: string; sub?: string; tone?: "default" | "danger" | "ok" }) {
   const valueColor = tone === "danger" ? "text-red-600 dark:text-red-400" : tone === "ok" ? "text-emerald-600 dark:text-emerald-400" : "text-gray-900 dark:text-white";
@@ -20,27 +22,35 @@ function Kpi({ label, value, sub, tone = "default" }: { label: string; value: st
 
 export default function FleetDashboard() {
   const [devices, setDevices] = useState<Device[]>([]);
+  const [sparkById, setSparkById] = useState<Map<string, DeviceSparkPoint[]>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const data = await api.get<Device[]>("/devices");
-        if (!cancelled) setDevices(data);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof ApiError ? err.message : "Gagal memuat data device.");
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
+  async function load(cancelledRef?: { current: boolean }) {
+    setIsLoading(true);
+    setError(null);
+    try {
+      // Satu request device (live KPI) + satu request summary (sparkline) — bukan N per device.
+      const [data, summary] = await Promise.all([
+        api.get<Device[]>("/devices"),
+        api.get<DevicesSummary>("/devices/summary?hours=6").catch(() => null),
+      ]);
+      if (cancelledRef?.current) return;
+      setDevices(data);
+      if (summary) setSparkById(new Map(summary.devices.map((s) => [s.id, s.spark])));
+    } catch (err) {
+      if (!cancelledRef?.current) setError(err instanceof ApiError ? err.message : "Gagal memuat data device.");
+    } finally {
+      if (!cancelledRef?.current) setIsLoading(false);
     }
-    load();
+  }
+
+  useEffect(() => {
+    const ref = { current: false };
+    load(ref);
     return () => {
-      cancelled = true;
+      ref.current = true;
     };
   }, []);
 
@@ -78,8 +88,18 @@ export default function FleetDashboard() {
         <p className="text-sm text-gray-500 dark:text-gray-400">Ringkasan real-time seluruh unit BMS yang kamu pantau.</p>
       </div>
 
-      {error && <div className="rounded-xl bg-red-50 p-4 text-sm text-red-600">{error}</div>}
-      {isLoading && <p className="text-sm text-gray-500 py-8 text-center">Memuat fleet...</p>}
+      {error && !isLoading && <ErrorState message={error} onRetry={() => load()} />}
+
+      {isLoading && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-24" />
+            ))}
+          </div>
+          <CardGridSkeleton count={6} />
+        </div>
+      )}
 
       {!isLoading && !error && devices.length === 0 && (
         <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 px-6 py-16 text-center bg-gray-50/50 dark:bg-white/[0.02]">
@@ -104,7 +124,7 @@ export default function FleetDashboard() {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {devices.map((d) => (
-              <DeviceCard key={d.id} device={d} variant="compact" nowMs={now} />
+              <DeviceCard key={d.id} device={d} variant="compact" nowMs={now} spark={sparkById.get(d.id)} />
             ))}
           </div>
         </>
