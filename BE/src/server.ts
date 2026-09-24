@@ -1,6 +1,5 @@
 import "dotenv/config";
 import { createServer } from "http";
-import { parse } from "url";
 import next from "next";
 import { WebSocketServer } from "ws";
 import { setWss } from "./lib/ws";
@@ -13,9 +12,9 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
+  // Biarkan Next mem-parse URL sendiri (WHATWG di internal) — hindari DEP0169 url.parse().
   const server = createServer((req, res) => {
-    const parsedUrl = parse(req.url ?? "", true);
-    handle(req, res, parsedUrl);
+    handle(req, res);
   });
 
   const wss = new WebSocketServer({ noServer: true });

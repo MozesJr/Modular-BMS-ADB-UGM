@@ -16,7 +16,10 @@ export async function GET(
     where: { id },
     include: {
       owner: { select: { id: true, name: true, email: true } },
-      packs: { include: { cells: true } },
+      packs: {
+        orderBy: { index: "asc" },
+        include: { cells: { orderBy: { index: "asc" } } },
+      },
       collaborators: {
         include: { user: { select: { id: true, name: true, email: true } } },
       },

@@ -48,6 +48,8 @@ model Device {
   ownerId       String?
   owner         User?                @relation("DeviceOwner", fields: [ownerId], references: [id])
   verified      Boolean              @default(false)
+  // Waktu server terakhir menerima paket MQTT dari device ini — sumber freshness (live/stale/offline).
+  lastSeen      DateTime?
   collaborators DeviceCollaborator[]
   createdAt     DateTime             @default(now())
   packs         Pack[]
@@ -106,10 +108,15 @@ model PackHistory {
   packIndex         Int
   temperature       Float?
   balancerConnected Boolean
+  // Nullable: device lama tak kirim arus/daya. Ampere (negatif=charging), Watt.
+  current           Float?
+  power             Float?
   recordedAt        DateTime // dari payload.timestamp (waktu firmware), bukan waktu insert DB
   createdAt         DateTime @default(now())
 
   @@index([deviceId, packIndex, recordedAt])
+  // Query history & agregasi memfilter per device + rentang waktu (tanpa packIndex di depan).
+  @@index([deviceId, recordedAt])
 }
 
 // Time-series history per cell, buat grafik tren.
@@ -124,4 +131,6 @@ model CellHistory {
   createdAt  DateTime @default(now())
 
   @@index([deviceId, packIndex, cellIndex, recordedAt])
+  // Query history & agregasi memfilter per device + rentang waktu (tanpa cellIndex di depan).
+  @@index([deviceId, recordedAt])
 }
