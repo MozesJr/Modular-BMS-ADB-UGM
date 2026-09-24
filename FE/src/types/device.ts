@@ -37,6 +37,8 @@ export type Device = {
   // null = device belum diklaim siapapun (auto-provisioned dari data MQTT sebelum didaftarkan).
   ownerId: string | null;
   verified: boolean;
+  // Waktu server terakhir menerima paket MQTT (sumber freshness). Null bila belum pernah.
+  lastSeen: string | null;
   createdAt: string;
   packs: Pack[];
   collaborators: Collaborator[];
@@ -47,33 +49,38 @@ export type Device = {
   } | null;
 };
 
-// --- History (buat grafik tren, lihat GET /api/devices/[id]/history) ---
-export type PackTemperaturePoint = {
-  recordedAt: string;
-  temperature: number | null;
-  balancerConnected: boolean;
+// --- History teragregasi (GET /api/devices/[id]/history?hours=&bucket=&cells=) ---
+// Backend meng-agregasi per bucket waktu (date_bin) alih-alih mengirim row mentah.
+export type HistoryBucket = {
+  t: string; // ISO awal bucket
+  cellMin: number | null;
+  cellMax: number | null;
+  cellAvg: number | null;
+  deltaMv: number | null;
+  tempAvg: number | null;
+  currentAvg: number | null;
+  powerAvg: number | null;
+  energyWh: number | null;
+  balancerOn: boolean;
 };
 
-export type CellVoltagePoint = {
-  recordedAt: string;
-  voltage: number;
-};
-
-export type CellHistorySeries = {
+export type PackCellSeries = {
   index: number;
-  voltage: CellVoltagePoint[];
+  points: { t: string; vAvg: number }[];
 };
 
 export type PackHistorySeries = {
   index: number;
-  temperature: PackTemperaturePoint[];
-  cells: CellHistorySeries[];
+  buckets: HistoryBucket[];
+  // Hanya ada bila diminta dengan ?cells=1.
+  cells?: PackCellSeries[];
 };
 
 export type DeviceHistory = {
   from: string;
   to: string;
   hours: number;
+  bucketSeconds: number;
   packs: PackHistorySeries[];
 };
 

@@ -16,8 +16,14 @@ import DeviceHistoryCharts from "@/components/devices/DeviceHistoryCharts";
 import PackCard from "@/components/devices/PackCard";
 import AvatarText from "@/components/ui/avatar/AvatarText";
 import { CopyIcon, CheckLineIcon } from "@/icons";
+import { getFreshness } from "@/lib/freshness";
+import Heartbeat from "@/components/devices/Heartbeat";
+import HealthRing from "@/components/devices/HealthRing";
+import AlarmTimeline from "@/components/devices/AlarmTimeline";
+import { computeHealthScore } from "@/lib/healthScore";
+import { evaluateSnapshot, evaluateHistoryEpisodes } from "@/lib/alertRules";
 
-const SPARKLINE_WINDOW_HOURS = 6;
+const ALARM_HISTORY_HOURS = 24;
 
 function RefreshIcon({ className }: { className?: string }) {
   return (
@@ -59,15 +65,6 @@ function truncateMiddle(value: string, headLen = 10, tailLen = 6) {
   return `${value.slice(0, headLen)}…${value.slice(-tailLen)}`;
 }
 
-function formatLastSeen(ms: number) {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ago`;
-}
-
 function applyRealtimeUpdate(prev: Device, update: BmsUpdatePayload): Device {
   const packsByIndex = new Map(prev.packs.map((p) => [p.index, p]));
 
@@ -104,7 +101,6 @@ function applyRealtimeUpdate(prev: Device, update: BmsUpdatePayload): Device {
   };
 }
 
-const LIVE_THRESHOLD_MS = 120_000;
 const NOMINAL_LIFEPO4_V_PER_CELL = 3.2;
 
 export default function DeviceDetail({ deviceId }: { deviceId: string }) {
@@ -114,7 +110,7 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdateAt, setLastUpdateAt] = useState<Date | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const { history: sparklineHistory } = useDeviceHistory(deviceId, SPARKLINE_WINDOW_HOURS);
+  const { history: alarmHistory } = useDeviceHistory(deviceId, ALARM_HISTORY_HOURS);
 
   const { isOpen, openModal, closeModal } = useModal();
   const [inviteEmail, setInviteEmail] = useState("");
@@ -173,15 +169,41 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
     return () => clearInterval(timer);
   }, []);
 
-  const initialLastUpdateAt =
-    device && device.packs.length > 0
+  // Prefer Device.lastSeen (waktu server terima paket); fallback ke max(pack.updatedAt).
+  const initialLastUpdateAt = device?.lastSeen
+    ? new Date(device.lastSeen)
+    : device && device.packs.length > 0
       ? new Date(Math.max(...device.packs.map((p) => new Date(p.updatedAt).getTime())))
       : null;
   const effectiveLastUpdateAt = lastUpdateAt ?? initialLastUpdateAt;
-  const isLive = effectiveLastUpdateAt != null && now - effectiveLastUpdateAt.getTime() < LIVE_THRESHOLD_MS;
+  const freshness = getFreshness(effectiveLastUpdateAt?.getTime() ?? null, now);
+
+  // GET /api/devices/[id] tak menjamin urutan packs; urutkan numerik di sini.
+  const sortedPacks = device ? [...device.packs].sort((a, b) => a.index - b.index) : [];
+
+  // Snapshot untuk alarm & health (live).
+  const packSnaps = sortedPacks.map((p) => ({
+    index: p.index,
+    temperature: p.temperature,
+    cells: p.cells.map((c) => ({ index: c.index, voltage: c.voltage })),
+  }));
+  const activeAlarms = evaluateSnapshot(packSnaps, freshness.status);
+  const health = computeHealthScore(packSnaps, freshness.status);
+  const alarmEpisodes = evaluateHistoryEpisodes(
+    (alarmHistory?.packs ?? []).map((p) => ({
+      index: p.index,
+      buckets: p.buckets.map((b) => ({
+        t: b.t,
+        cellMin: b.cellMin,
+        cellMax: b.cellMax,
+        deltaMv: b.deltaMv,
+        tempAvg: b.tempAvg,
+      })),
+    })),
+  );
 
   const isOwner = device?.ownerId === session?.user?.id;
-  const firstPackCellCount = device?.packs[0]?.cells.length ?? 0;
+  const firstPackCellCount = sortedPacks[0]?.cells.length ?? 0;
   const hasHeterogeneousPacks =
     (device?.packs.length ?? 0) > 1 &&
     device!.packs.some((p) => p.cells.length !== firstPackCellCount);
@@ -290,18 +312,16 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
             </div>
 
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              {effectiveLastUpdateAt && (
-                <Badge
-                  color={isLive ? "success" : "error"}
-                  startIcon={
-                    <span className="relative flex h-2 w-2">
-                      {isLive && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />}
-                      <span className={`relative inline-flex h-2 w-2 rounded-full ${isLive ? "bg-emerald-500" : "bg-red-500"}`} />
-                    </span>
-                  }
-                >
-                  {isLive ? "Live Stream" : "Offline"} · Active {formatLastSeen(now - effectiveLastUpdateAt.getTime())}
-                </Badge>
+              {effectiveLastUpdateAt ? (
+                <Heartbeat status={freshness.status} ageMs={freshness.ageMs} />
+              ) : (
+                <Badge color="light">Belum ada paket data</Badge>
+              )}
+              {activeAlarms.length > 0 && (
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 dark:bg-red-500/10 dark:text-red-400">
+                  <span className="h-2 w-2 rounded-full bg-red-500" />
+                  {activeAlarms.length} alarm aktif
+                </span>
               )}
               {firstPackCellCount > 0 && (
                 <Badge color="info">
@@ -316,7 +336,8 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-3 shrink-0">
+            {sortedPacks.length > 0 && <HealthRing breakdown={health} />}
             <button
               type="button"
               onClick={handleRefresh}
@@ -346,20 +367,23 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
           </h4>
         </div>
 
-        {device.packs.length === 0 ? (
+        {sortedPacks.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 p-12 text-center bg-white dark:bg-white/[0.02]">
             <p className="text-sm text-gray-500">Belum ada data pack telemetri yang masuk dari MQTT.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            {device.packs.map((pack) => (
-              <div key={pack.index} className={device.packs.length === 1 ? "xl:col-span-2" : undefined}>
-                <PackCard pack={pack} history={sparklineHistory?.packs.find((p) => p.index === pack.index) ?? null} />
+            {sortedPacks.map((pack) => (
+              <div key={pack.index} className={sortedPacks.length === 1 ? "xl:col-span-2" : undefined}>
+                <PackCard pack={pack} freshness={freshness.status} />
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {/* Alarm & Event Timeline */}
+      <AlarmTimeline activeAlarms={activeAlarms} episodes={alarmEpisodes} />
 
       {/* Grafik Riwayat Telemetri */}
       <DeviceHistoryCharts deviceId={deviceId} />
@@ -434,7 +458,7 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
             </div>
             <div className="flex items-center gap-3 justify-end pt-2">
               <Button size="sm" variant="outline" onClick={closeModal} type="button">Batal</Button>
-              <Button size="sm" disabled={isInviting}>{isInviting ? "Mengirim..." : "Kirim Undangan"}</Button>
+              <Button type="submit" size="sm" disabled={isInviting}>{isInviting ? "Mengirim..." : "Kirim Undangan"}</Button>
             </div>
           </form>
         </div>
