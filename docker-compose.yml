@@ -11,7 +11,6 @@
 #      "master_db" di VPS (cek: docker network ls / docker inspect master_postgresql)
 #   3. BE/.env.production dan FE/.env.production sudah diisi (cp dari *.env.production.example)
 #   4. MQTT/secrets/password_file sudah dibuat:  MQTT/scripts/init-passwd.sh
-include:
 # MQTT/ sengaja tidak di-include: broker Mosquitto sudah jalan di VPS (project "master_db"),
 # bukan container yang dikelola dari monorepo ini.
 #
