@@ -73,6 +73,13 @@ export async function persistSnapshot(job: IngestJob): Promise<PersistResult> {
 
   return prisma.$transaction(
     async (tx) => {
+      // 0) Device.lastSeen = waktu server menerima paket ini — sumber freshness FE (live/stale/offline,
+      // lihat FE/src/lib/freshness.ts). Guard staleness sama seperti Pack.recordedAt di bawah, supaya
+      // pesan yang datang terlambat/kacau urutan tidak memundurkan lastSeen.
+      await tx.$executeRaw(Prisma.sql`
+        UPDATE "Device" SET "lastSeen" = ${ts(receivedAt)}
+        WHERE "id" = ${device.id} AND ("lastSeen" IS NULL OR "lastSeen" <= ${ts(receivedAt)})`);
+
       // 1) State terbaru per pack. Hanya menimpa bila pesan ini tidak lebih lama dari yang tersimpan.
       const packValues = payload.packs.map(
         (p) =>

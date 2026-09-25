@@ -1,0 +1,45 @@
+# docker-compose.dev.yml — STACK DEV LOKAL (terpisah dari produksi).
+# Tujuan: dev tidak menulis ke DB/broker VPS. Jalankan:
+#   docker compose -f docker-compose.dev.yml up -d
+# lalu (sekali) migrasi schema ke DB lokal:
+#   cd BE && DATABASE_URL="postgresql://bms_user:devpass@localhost:5433/bms_db?sslmode=disable" \
+#     npx prisma migrate deploy
+# BE/FE dev tetap dijalankan di host (npm run dev) dengan BE/.env.development.
+#
+# Catatan port: postgres-dev di 5433 (5432 dipakai SSH tunnel ke VPS).
+services:
+  postgres-dev:
+    image: postgres:16-alpine
+    container_name: bms-postgres-dev
+    environment:
+      POSTGRES_USER: bms_user
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: bms_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - bms-pg-dev:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  mosquitto-dev:
+    image: eclipse-mosquitto:2
+    container_name: bms-mosquitto-dev
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./MQTT/config.dev/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+
+  simulator:
+    build: ./tools/simulator
+    container_name: bms-simulator-dev
+    environment:
+      MQTT_URL: "mqtt://mosquitto-dev:1883"
+      DEVICE_COUNT: "3"     # 1 = single device, 3 = fleet (DEV-SIM-001..003)
+      INTERVAL_MS: "10000"
+    depends_on:
+      - mosquitto-dev
+    restart: unless-stopped
+
+volumes:
+  bms-pg-dev:

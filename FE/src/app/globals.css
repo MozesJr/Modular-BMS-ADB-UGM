@@ -779,3 +779,32 @@ span.flatpickr-weekday,
   opacity: 0.8;
   cursor: grabbing; /* Changes the cursor to indicate dragging */
 }
+
+/* ===== Battery Digital Twin (Fase B) — animasi bermakna, dihormati prefers-reduced-motion ===== */
+@keyframes twin-wave {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-20px); }
+}
+@keyframes twin-flow {
+  0% { opacity: 0; transform: translateX(0); }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(var(--twin-flow-dx, 40px)); }
+}
+@keyframes twin-balance-pulse {
+  0% { stroke-dashoffset: 0; opacity: 0.15; }
+  50% { opacity: 0.9; }
+  100% { stroke-dashoffset: -24; opacity: 0.15; }
+}
+@keyframes heartbeat-dot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.6); opacity: 0.55; }
+}
+.twin-wave { animation: twin-wave 2.4s linear infinite; }
+.twin-flow { animation: twin-flow 1.6s linear infinite; }
+.twin-balance { stroke-dasharray: 6 6; animation: twin-balance-pulse 1.8s linear infinite; }
+.heartbeat-dot { animation: heartbeat-dot 1s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .twin-wave, .twin-flow, .twin-balance, .heartbeat-dot { animation: none !important; }
+}

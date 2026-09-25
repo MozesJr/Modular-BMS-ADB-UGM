@@ -1,6 +1,5 @@
 import "dotenv/config";
 import { createServer } from "http";
-import { parse } from "url";
 import next from "next";
 import { WebSocketServer } from "ws";
 import { setWss, closeAllClients } from "./lib/ws";
@@ -28,12 +27,12 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
+  // Biarkan Next mem-parse URL sendiri (WHATWG di internal) — hindari DEP0169 url.parse().
   const server = createServer((req, res) => {
     // Header internal: alamat socket asli (dipakai rate limiter bila tidak ada header proxy). Selalu
     // ditimpa di sini supaya klien tidak bisa memalsukannya.
     req.headers[PEER_HEADER] = req.socket.remoteAddress ?? "";
-    const parsedUrl = parse(req.url ?? "", true);
-    handle(req, res, parsedUrl);
+    handle(req, res);
   });
 
   const wss = new WebSocketServer({ noServer: true });

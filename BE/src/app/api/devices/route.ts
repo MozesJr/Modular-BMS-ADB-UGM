@@ -17,7 +17,10 @@ export const GET = route(async () => {
       ],
     },
     include: {
-      packs: { include: { cells: true } },
+      packs: {
+        orderBy: { index: "asc" },
+        include: { cells: { orderBy: { index: "asc" } } },
+      },
       collaborators: { include: { user: { select: { id: true, name: true, email: true } } } },
     },
   });

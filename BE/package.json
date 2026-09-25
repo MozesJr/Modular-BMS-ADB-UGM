@@ -2,6 +2,9 @@
   "name": "bms-backend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20.9"
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "next build && tsc -p tsconfig.server.json && tsc-alias -p tsconfig.server.json",

@@ -75,6 +75,8 @@ model Device {
   ownerId       String?
   owner         User?                @relation("DeviceOwner", fields: [ownerId], references: [id])
   verified      Boolean              @default(false)
+  // Waktu server terakhir menerima paket MQTT dari device ini — sumber freshness (live/stale/offline).
+  lastSeen      DateTime?
   collaborators DeviceCollaborator[]
   createdAt     DateTime             @default(now())
   packs         Pack[]
