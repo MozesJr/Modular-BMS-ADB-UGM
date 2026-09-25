@@ -15,20 +15,21 @@ const CATEGORY_META: Record<Category, { label: string; badge: string }> = {
   nearing: { label: "Mendekati ambang", badge: "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400" },
 };
 
-// Ambang "mendekati" imbalance = 70% dari ambang warning — dini tapi belum jadi alarm.
-const NEARING_RATIO = 0.7;
+// Ambang "mendekati" = rasio × ambang CRITICAL (bukan warn — delta di atas warn sudah lolos
+// sebagai alarm warning tersendiri; "nearing" khusus menyorot yang sudah dekat CRITICAL).
+const nearingFloor = ALERT_THRESHOLDS.imbalanceCriticalMv * ALERT_THRESHOLDS.imbalanceNearingCriticalRatio;
 
 type AttentionItem = { device: Device; category: Category; detail: string };
 
 function buildAttentionList(devices: Device[], summaries: Map<string, DeviceSummary>): AttentionItem[] {
   const items: AttentionItem[] = [];
-  const nearingFloor = ALERT_THRESHOLDS.imbalanceWarnMv * NEARING_RATIO;
 
   for (const device of devices) {
     const s = summaries.get(device.id);
     if (!s) continue;
 
-    if (s.realAlarms.length > 0 && s.freshness.status !== "offline") {
+    const hasCritical = s.realAlarms.some((a) => a.severity === "critical");
+    if (hasCritical && s.freshness.status !== "offline") {
       items.push({
         device,
         category: "alarm",
@@ -48,11 +49,22 @@ function buildAttentionList(devices: Device[], summaries: Map<string, DeviceSumm
       });
       continue;
     }
-    if (s.worstDelta >= nearingFloor && s.worstDelta < ALERT_THRESHOLDS.imbalanceWarnMv) {
+    // Live, tanpa alarm critical dari sini: delta mendekati CRITICAL dapat label khusus "nearing"
+    // (lebih spesifik dari alarm warning generik); delta warning lain (20–<nearingFloor mV) tetap
+    // masuk kategori "alarm" biasa (severity warning — sejalan dengan badge "Warn" di DeviceCard).
+    if (s.worstDelta >= nearingFloor && s.worstDelta < ALERT_THRESHOLDS.imbalanceCriticalMv) {
       items.push({
         device,
         category: "nearing",
-        detail: `Delta ${s.worstDelta} mV, mendekati ambang ${ALERT_THRESHOLDS.imbalanceWarnMv} mV`,
+        detail: `Delta ${s.worstDelta} mV, mendekati ambang critical ${ALERT_THRESHOLDS.imbalanceCriticalMv} mV`,
+      });
+      continue;
+    }
+    if (s.realAlarms.length > 0) {
+      items.push({
+        device,
+        category: "alarm",
+        detail: s.realAlarms.length === 1 ? s.realAlarms[0].message : `${s.realAlarms.length} alarm aktif`,
       });
     }
   }

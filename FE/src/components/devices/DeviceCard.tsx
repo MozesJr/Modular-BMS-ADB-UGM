@@ -213,11 +213,20 @@ function DeviceCardImpl({
           {variant === "detailed" && (
             <span className="text-xs text-gray-400">{device.collaborators.length} kolab</span>
           )}
+          {/* Status ikut freshness dulu: live -> status alarm (OK/Warn/Critical); stale/offline
+              -> label netral "Data basi", TANPA "OK" (data basi bukan berarti aman). */}
           {!neverReported &&
-            (realAlarms.length > 0 ? (
+            (freshness.status !== "live" ? (
+              <span className="text-xs text-gray-400">Data basi · {formatAge(freshness.ageMs)}</span>
+            ) : realAlarms.some((a) => a.severity === "critical") ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-500/10 dark:text-red-400">
                 <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-                {realAlarms.length}
+                {realAlarms.length} Critical
+              </span>
+            ) : realAlarms.length > 0 ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                {realAlarms.length} Warn
               </span>
             ) : (
               <span className="text-xs text-emerald-600 dark:text-emerald-400">OK</span>

@@ -9,6 +9,10 @@ export const ALERT_THRESHOLDS = {
   tempHigh: 45, // °C — suhu kritis bila > nilai ini
   imbalanceWarnMv: 20, // mV — delta cell warning
   imbalanceCriticalMv: 50, // mV — delta cell critical
+  // "Mendekati ambang" (Needs Attention) = rasio ini × imbalanceCriticalMv, BUKAN dari warn —
+  // delta di atas warn (20 mV) sudah lolos sebagai alarm warning tersendiri (realAlarms), jadi
+  // "nearing" hanya relevan untuk delta yang belum jadi alarm tapi sudah dekat CRITICAL.
+  imbalanceNearingCriticalRatio: 0.8,
 } as const;
 
 export type AlarmSeverity = "warning" | "critical";

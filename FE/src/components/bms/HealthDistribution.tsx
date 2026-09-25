@@ -23,7 +23,10 @@ export default function HealthDistribution({ devices, summaries }: { devices: De
             return (
               <li key={device.id}>
                 <Link href={`/devices/${device.id}`} className="group flex items-center gap-3">
-                  <span className="w-24 shrink-0 truncate text-xs text-gray-600 dark:text-gray-300 group-hover:text-brand-500">
+                  <span
+                    title={device.name || device.serialNumber}
+                    className="w-28 shrink-0 truncate text-xs text-gray-600 dark:text-gray-300 group-hover:text-brand-500 sm:w-40"
+                  >
                     {device.name || device.serialNumber}
                   </span>
                   <span className="h-2.5 flex-1 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800" role="img" aria-label={`Health ${summary.health.score} dari 100`}>

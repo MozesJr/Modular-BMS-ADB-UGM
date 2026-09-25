@@ -18,6 +18,7 @@ export type FleetKpi = {
   dischargeW: number; // daya keluar (discharging), live saja, positif
   netW: number; // dischargeW - chargeW; negatif = net charging
   worst: { device: Device; deltaMv: number } | null; // imbalance terburuk, device LIVE saja
+  avgSocLive: number | null; // rata-rata SoC est. device live (null bila tak ada yang punya SoC)
 };
 
 export function computeFleetKpi(devices: Device[], summaries: Map<string, DeviceSummary>): FleetKpi {
@@ -30,6 +31,8 @@ export function computeFleetKpi(devices: Device[], summaries: Map<string, Device
   let chargeW = 0;
   let dischargeW = 0;
   let worst: { device: Device; deltaMv: number } | null = null;
+  let socSum = 0;
+  let socCount = 0;
 
   for (const device of devices) {
     const s = summaries.get(device.id);
@@ -51,6 +54,10 @@ export function computeFleetKpi(devices: Device[], summaries: Map<string, Device
       else dischargeW += p.power;
     }
     if (worst == null || s.worstDelta > worst.deltaMv) worst = { device, deltaMv: s.worstDelta };
+    if (s.soc != null) {
+      socSum += s.soc;
+      socCount++;
+    }
   }
 
   return {
@@ -65,5 +72,6 @@ export function computeFleetKpi(devices: Device[], summaries: Map<string, Device
     dischargeW,
     netW: dischargeW - chargeW,
     worst,
+    avgSocLive: socCount > 0 ? socSum / socCount : null,
   };
 }
