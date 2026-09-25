@@ -1,47 +1,15 @@
 "use client";
-import { useState } from "react";
+import { useState, memo } from "react";
 import Link from "next/link";
 import Badge from "@/components/ui/badge/Badge";
 import type { Device, DeviceSparkPoint } from "@/types/device";
-import { getFreshness, formatAge, FRESHNESS_META } from "@/lib/freshness";
-import { deriveCellStats, estimateSocPercent, cellDeviationsMv, deviationColor } from "@/lib/packMetrics";
-import { computeHealthScore } from "@/lib/healthScore";
-import { evaluateSnapshot } from "@/lib/alertRules";
+import { formatAge, FRESHNESS_META } from "@/lib/freshness";
+import { cellDeviationsMv, deviationColor } from "@/lib/packMetrics";
 import { healthColor } from "@/lib/healthScore";
-import { CopyIcon, CheckLineIcon } from "@/icons";
+import { deviceSummary } from "@/lib/deviceSummary";
+import { CopyIcon, CheckLineIcon, ArrowUpIcon, ArrowDownIcon } from "@/icons";
 
-// Ringkasan device untuk kartu (dipakai getFreshness + util derivasi/health/alarm bersama).
-export function deviceSummary(device: Device, nowMs: number) {
-  const freshness = getFreshness(device.lastSeen ? new Date(device.lastSeen).getTime() : null, nowMs);
-  const packs = [...device.packs].sort((a, b) => a.index - b.index);
-  const snaps = packs.map((p) => ({
-    index: p.index,
-    temperature: p.temperature,
-    cells: p.cells.map((c) => ({ index: c.index, voltage: c.voltage })),
-  }));
-  const health = computeHealthScore(snaps, freshness.status);
-  const alarms = evaluateSnapshot(snaps, freshness.status);
-
-  // SoC device = rata-rata SoC per pack.
-  const socs = packs
-    .map((p) => {
-      const s = deriveCellStats(p.cells);
-      return estimateSocPercent(s.packVoltage, s.count);
-    })
-    .filter((v): v is number => v != null);
-  const soc = socs.length ? socs.reduce((a, b) => a + b, 0) / socs.length : null;
-
-  // Total daya live (jumlah power pack; null diabaikan).
-  const totalPower = packs.reduce((sum, p) => sum + (p.power ?? 0), 0);
-  const cellCount = packs.reduce((sum, p) => sum + p.cells.length, 0);
-  // Delta terburuk antar pack.
-  const worstDelta = packs.reduce((mx, p) => {
-    const d = deriveCellStats(p.cells).deltaMv;
-    return d != null && d > mx ? d : mx;
-  }, 0);
-
-  return { freshness, packs, snaps, health, alarms, soc, totalPower, cellCount, worstDelta };
-}
+export { deviceSummary };
 
 // Sparkline SVG kecil (tanpa lib). Memutus garis saat gap bucket (jarak waktu > 2× spacing minimum).
 function Sparkline({ spark }: { spark: DeviceSparkPoint[] }) {
@@ -109,22 +77,37 @@ function CellStrip({ cells }: { cells: { index: number; voltage: number }[] }) {
   );
 }
 
-export default function DeviceCard({
+function DeviceCardImpl({
   device,
   variant = "compact",
   nowMs = Date.now(),
   spark,
+  energyToday,
 }: {
   device: Device;
   variant?: "compact" | "detailed";
   nowMs?: number;
   spark?: DeviceSparkPoint[];
+  energyToday?: { inWh: number; outWh: number };
 }) {
   const [copied, setCopied] = useState(false);
-  const { freshness, packs, health, alarms, soc, cellCount, worstDelta } = deviceSummary(device, nowMs);
+  const { freshness, neverReported, packs, health, realAlarms, soc, cellCount, worstDelta, totalPower } = deviceSummary(device, nowMs);
   const meta = FRESHNESS_META[freshness.status];
   const hc = healthColor(health.score);
   const dim = freshness.status === "offline";
+  // Arah daya device (agregat semua pack, dalam Watt — bukan currentDirection() yang menilai
+  // Ampere per-pack): konvensi sama (negatif = charging), ambang idle 1 W supaya tidak "flap"
+  // di sekitar nol.
+  const dir: "charging" | "discharging" | "idle" =
+    freshness.status !== "live" ? "idle" : totalPower < -1 ? "charging" : totalPower > 1 ? "discharging" : "idle";
+
+  // Bug 1: bedakan "belum pernah kirim data" (nilai disembunyikan) dari "last known" (nilai
+  // diredupkan, label "Last known · <umur>") — lihat resolveLastSeenMs di lib/freshness.ts.
+  const freshnessLabel = neverReported
+    ? "Belum ada data"
+    : freshness.status === "offline"
+      ? `Last known · ${formatAge(freshness.ageMs)}`
+      : `${meta.label} · ${formatAge(freshness.ageMs)}`;
 
   async function copyId(e: React.MouseEvent) {
     e.preventDefault();
@@ -166,59 +149,87 @@ export default function DeviceCard({
         </div>
       </div>
 
-      {/* Cell-strip per pack */}
-      <div className="space-y-1.5 mb-3">
-        {packs.slice(0, variant === "detailed" ? packs.length : 1).map((p) => (
-          <CellStrip key={p.index} cells={p.cells.map((c) => ({ index: c.index, voltage: c.voltage }))} />
-        ))}
-        {variant === "compact" && packs.length > 1 && (
-          <span className="text-[10px] text-gray-400">+{packs.length - 1} pack lain</span>
-        )}
-      </div>
-
-      {/* Sparkline 6 jam (delta/power) — hanya bila data summary tersedia */}
-      {spark && spark.length > 1 && (
-        <div className="mb-3">
-          <Sparkline spark={spark} />
+      {neverReported ? (
+        <div className="mb-3 rounded-lg border border-dashed border-gray-200 dark:border-gray-700 px-3 py-3 text-center text-xs text-gray-400">
+          Device belum pernah mengirim data.
         </div>
+      ) : (
+        <>
+          {/* Cell-strip per pack */}
+          <div className="space-y-1.5 mb-3">
+            {packs.slice(0, variant === "detailed" ? packs.length : 1).map((p) => (
+              <CellStrip key={p.index} cells={p.cells.map((c) => ({ index: c.index, voltage: c.voltage }))} />
+            ))}
+            {variant === "compact" && packs.length > 1 && (
+              <span className="text-[10px] text-gray-400">+{packs.length - 1} pack lain</span>
+            )}
+          </div>
+
+          {/* Sparkline 6 jam (delta/power) — hanya bila data summary tersedia */}
+          {spark && spark.length > 1 && (
+            <div className="mb-3">
+              <Sparkline spark={spark} />
+            </div>
+          )}
+
+          {/* Metrics row */}
+          <div className="grid grid-cols-2 gap-2 mb-3 text-center sm:grid-cols-4">
+            <div>
+              <div className="text-sm font-bold text-gray-800 dark:text-white tabular-nums">{soc != null ? `${soc.toFixed(0)}%` : "—"}</div>
+              <div className="text-[10px] text-gray-400">SoC est.</div>
+            </div>
+            <div>
+              <div className={`text-sm font-bold tabular-nums ${worstDelta > 50 ? "text-red-500" : worstDelta > 20 ? "text-amber-500" : "text-gray-800 dark:text-white"}`}>{worstDelta} mV</div>
+              <div className="text-[10px] text-gray-400">Δ max</div>
+            </div>
+            <div
+              title={
+                (dir === "charging" ? "Net charging" : dir === "discharging" ? "Net discharging" : "Idle") +
+                (energyToday ? ` · hari ini ${energyToday.inWh.toFixed(0)} Wh in / ${energyToday.outWh.toFixed(0)} Wh out` : "")
+              }
+            >
+              <div className={`inline-flex items-center gap-0.5 text-sm font-bold tabular-nums ${dir === "charging" ? "text-emerald-600 dark:text-emerald-400" : dir === "discharging" ? "text-amber-600 dark:text-amber-400" : "text-gray-800 dark:text-white"}`}>
+                {dir === "charging" && <ArrowDownIcon className="h-3 w-3" />}
+                {dir === "discharging" && <ArrowUpIcon className="h-3 w-3" />}
+                {Math.abs(totalPower).toFixed(0)} W
+              </div>
+              <div className="text-[10px] text-gray-400">Daya</div>
+            </div>
+            <div>
+              <div className="text-sm font-bold text-gray-800 dark:text-white tabular-nums">{packs.length}×{cellCount}</div>
+              <div className="text-[10px] text-gray-400">pack×cell</div>
+            </div>
+          </div>
+        </>
       )}
 
-      {/* Metrics row */}
-      <div className="grid grid-cols-3 gap-2 mb-3 text-center">
-        <div>
-          <div className="text-sm font-bold text-gray-800 dark:text-white tabular-nums">{soc != null ? `${soc.toFixed(0)}%` : "—"}</div>
-          <div className="text-[10px] text-gray-400">SoC est.</div>
-        </div>
-        <div>
-          <div className={`text-sm font-bold tabular-nums ${worstDelta > 50 ? "text-red-500" : worstDelta > 20 ? "text-amber-500" : "text-gray-800 dark:text-white"}`}>{worstDelta} mV</div>
-          <div className="text-[10px] text-gray-400">Δ max</div>
-        </div>
-        <div>
-          <div className="text-sm font-bold text-gray-800 dark:text-white tabular-nums">{packs.length}×{cellCount}</div>
-          <div className="text-[10px] text-gray-400">pack×cell</div>
-        </div>
-      </div>
-
       {/* Footer: freshness + alarms (+ collaborators for detailed) */}
-      <div className="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-gray-800">
-        <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${meta.text}`}>
-          <span className={`h-2 w-2 rounded-full ${meta.dot}`} />
-          {meta.label} · {device.lastSeen ? formatAge(freshness.ageMs) : "belum ada data"}
+      <div className="flex items-center justify-between gap-2 pt-3 border-t border-gray-100 dark:border-gray-800">
+        <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${neverReported ? "text-gray-400" : meta.text}`}>
+          <span className={`h-2 w-2 rounded-full ${neverReported ? "bg-gray-300 dark:bg-gray-600" : meta.dot}`} />
+          {freshnessLabel}
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {variant === "detailed" && (
             <span className="text-xs text-gray-400">{device.collaborators.length} kolab</span>
           )}
-          {alarms.length > 0 ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-500/10 dark:text-red-400">
-              <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-              {alarms.length}
-            </span>
-          ) : (
-            <span className="text-xs text-emerald-600 dark:text-emerald-400">OK</span>
-          )}
+          {!neverReported &&
+            (realAlarms.length > 0 ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-500/10 dark:text-red-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+                {realAlarms.length}
+              </span>
+            ) : (
+              <span className="text-xs text-emerald-600 dark:text-emerald-400">OK</span>
+            ))}
         </div>
       </div>
     </Link>
   );
 }
+
+// React.memo: props {device, nowMs, spark, energyToday} — update WS pada satu device hanya
+// mengganti referensi objek device ITU di FleetDashboard (lihat applyRealtimeUpdate), jadi kartu
+// device lain menerima props yang identik secara referensi dan React.memo melewati re-render.
+const DeviceCard = memo(DeviceCardImpl);
+export default DeviceCard;

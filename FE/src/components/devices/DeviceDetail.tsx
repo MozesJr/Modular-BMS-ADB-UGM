@@ -17,7 +17,7 @@ import DeviceHistoryCharts from "@/components/devices/DeviceHistoryCharts";
 import PackCard from "@/components/devices/PackCard";
 import AvatarText from "@/components/ui/avatar/AvatarText";
 import { CopyIcon, CheckLineIcon } from "@/icons";
-import { getFreshness } from "@/lib/freshness";
+import { getFreshness, resolveLastSeenMs } from "@/lib/freshness";
 import Heartbeat from "@/components/devices/Heartbeat";
 import HealthRing from "@/components/devices/HealthRing";
 import AlarmTimeline from "@/components/devices/AlarmTimeline";
@@ -140,14 +140,11 @@ export default function DeviceDetail({ deviceId }: { deviceId: string }) {
     return () => clearInterval(timer);
   }, []);
 
-  // Prefer Device.lastSeen (waktu server terima paket); fallback ke max(pack.updatedAt).
-  const initialLastUpdateAt = device?.lastSeen
-    ? new Date(device.lastSeen)
-    : device && device.packs.length > 0
-      ? new Date(Math.max(...device.packs.map((p) => new Date(p.updatedAt).getTime())))
-      : null;
-  const effectiveLastUpdateAt = lastUpdateAt ?? initialLastUpdateAt;
-  const freshness = getFreshness(effectiveLastUpdateAt?.getTime() ?? null, now);
+  // resolveLastSeenMs: Device.lastSeen (server) dengan fallback max(pack.updatedAt) — SATU
+  // implementasi dipakai di sini dan di deviceSummary() (Dashboard/My Devices/Fleet v2).
+  const initialLastUpdateAt = device ? resolveLastSeenMs(device) : null;
+  const effectiveLastUpdateAt = lastUpdateAt?.getTime() ?? initialLastUpdateAt;
+  const freshness = getFreshness(effectiveLastUpdateAt, now);
 
   // GET /api/devices/[id] tak menjamin urutan packs; urutkan numerik di sini.
   const sortedPacks = device ? [...device.packs].sort((a, b) => a.index - b.index) : [];

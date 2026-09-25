@@ -12,15 +12,12 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { assertCanView, requireAuth } from "@/lib/authz";
 import { route } from "@/lib/http";
+import { ENERGY_GAP_S } from "@/lib/energy";
 
 const DEFAULT_HOURS = 24;
 const MAX_HOURS = 24 * 30;
 const MIN_BUCKET_S = 10;
 const MAX_BUCKET_S = 3600;
-// Interval sampling firmware (~10s). Jarak antar sampel > 2x ini dianggap gap (offline) dan
-// tidak dihitung sebagai energi.
-const SAMPLING_INTERVAL_S = 10;
-const ENERGY_GAP_S = 2 * SAMPLING_INTERVAL_S;
 
 function autoBucketSeconds(hours: number): number {
   if (hours <= 6) return 30;

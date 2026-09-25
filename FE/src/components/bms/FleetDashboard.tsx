@@ -5,7 +5,14 @@ import { api, ApiError } from "@/lib/api";
 import type { Device, DevicesSummary, DeviceSparkPoint } from "@/types/device";
 import { useBmsSocket } from "@/hooks/useBmsSocket";
 import { applyRealtimeUpdate } from "@/lib/realtimeMerge";
-import DeviceCard, { deviceSummary } from "@/components/devices/DeviceCard";
+import { deviceSummary } from "@/lib/deviceSummary";
+import { computeFleetKpi } from "@/lib/fleetKpi";
+import DeviceCard from "@/components/devices/DeviceCard";
+import FleetPulse from "@/components/bms/FleetPulse";
+import CellWall from "@/components/bms/CellWall";
+import NeedsAttention from "@/components/bms/NeedsAttention";
+import HealthDistribution from "@/components/bms/HealthDistribution";
+import LiveEventFeed from "@/components/bms/LiveEventFeed";
 import { CardGridSkeleton, Skeleton } from "@/components/common/Skeleton";
 import ErrorState from "@/components/common/ErrorState";
 
@@ -23,6 +30,7 @@ function Kpi({ label, value, sub, tone = "default" }: { label: string; value: st
 export default function FleetDashboard() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [sparkById, setSparkById] = useState<Map<string, DeviceSparkPoint[]>>(new Map());
+  const [energyTodayById, setEnergyTodayById] = useState<Map<string, { inWh: number; outWh: number }>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -31,14 +39,18 @@ export default function FleetDashboard() {
     setIsLoading(true);
     setError(null);
     try {
-      // Satu request device (live KPI) + satu request summary (sparkline) — bukan N per device.
+      // Satu request device (live KPI) + satu request summary (sparkline + energi hari ini) —
+      // bukan N per device.
       const [data, summary] = await Promise.all([
         api.get<Device[]>("/devices"),
         api.get<DevicesSummary>("/devices/summary?hours=6").catch(() => null),
       ]);
       if (cancelledRef?.current) return;
       setDevices(data);
-      if (summary) setSparkById(new Map(summary.devices.map((s) => [s.id, s.spark])));
+      if (summary) {
+        setSparkById(new Map(summary.devices.map((s) => [s.id, s.spark])));
+        setEnergyTodayById(new Map(summary.devices.map((s) => [s.id, { inWh: s.energyTodayInWh, outWh: s.energyTodayOutWh }])));
+      }
     } catch (err) {
       if (!cancelledRef?.current) setError(err instanceof ApiError ? err.message : "Gagal memuat data device.");
     } finally {
@@ -63,23 +75,28 @@ export default function FleetDashboard() {
     return () => clearInterval(t);
   }, []);
 
-  const kpi = useMemo(() => {
-    const summaries = devices.map((d) => ({ d, s: deviceSummary(d, now) }));
-    const online = summaries.filter((x) => x.s.freshness.status === "live").length;
-    const packs = summaries.reduce((sum, x) => sum + x.s.packs.length, 0);
-    const cells = summaries.reduce((sum, x) => sum + x.s.cellCount, 0);
-    const alarms = summaries.reduce((sum, x) => sum + x.s.alarms.length, 0);
-    // Daya live = jumlah power device yang sedang live.
-    const totalPower = summaries
-      .filter((x) => x.s.freshness.status === "live")
-      .reduce((sum, x) => sum + x.s.totalPower, 0);
-    // Device imbalance terburuk.
-    let worst: { d: Device; delta: number } | null = null;
-    for (const x of summaries) {
-      if (worst == null || x.s.worstDelta > worst.delta) worst = { d: x.d, delta: x.s.worstDelta };
-    }
-    return { online, total: devices.length, packs, cells, alarms, totalPower, worst };
+  // Ringkasan per device — dipakai komponen agregat (KPI, Needs Attention, Health Distribution,
+  // Live Event Feed). Komponen berat per-device (CellWall, DeviceCard) MENGHITUNG SENDIRI
+  // deviceSummary() dari props {device, nowMs} dan di-React.memo di level situ, supaya update WS
+  // pada satu device tidak memaksa re-render/re-heatmap device lain — tanpa cache lintas-render
+  // manual (ref during render dilarang oleh aturan React/compiler-eslint di proyek ini).
+  const summaries = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof deviceSummary>>();
+    for (const d of devices) m.set(d.id, deviceSummary(d, now));
+    return m;
   }, [devices, now]);
+  const kpi = useMemo(() => computeFleetKpi(devices, summaries), [devices, summaries]);
+  const energyTodayTotal = useMemo(() => {
+    let inWh = 0;
+    let outWh = 0;
+    for (const d of devices) {
+      const e = energyTodayById.get(d.id);
+      if (!e) continue;
+      inWh += e.inWh;
+      outWh += e.outWh;
+    }
+    return { inWh, outWh };
+  }, [devices, energyTodayById]);
 
   return (
     <div className="space-y-6">
@@ -92,6 +109,7 @@ export default function FleetDashboard() {
 
       {isLoading && (
         <div className="space-y-6">
+          <Skeleton className="h-40" />
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
             {Array.from({ length: 6 }).map((_, i) => (
               <Skeleton key={i} className="h-24" />
@@ -111,20 +129,39 @@ export default function FleetDashboard() {
 
       {!isLoading && !error && devices.length > 0 && (
         <>
+          <FleetPulse kpi={kpi} nowMs={now} energyToday={energyTodayTotal} />
+
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
-            <Kpi label="Device Online" value={`${kpi.online}/${kpi.total}`} sub="live sekarang" tone={kpi.online > 0 ? "ok" : "default"} />
+            <Kpi label="Device Live" value={`${kpi.liveCount}/${kpi.total}`} sub={`${kpi.staleCount} stale · ${kpi.offlineCount} offline`} tone={kpi.liveCount > 0 ? "ok" : "default"} />
             <Kpi label="Pack Dipantau" value={String(kpi.packs)} />
             <Kpi label="Cell Dipantau" value={String(kpi.cells)} />
-            <Kpi label="Alarm Aktif" value={String(kpi.alarms)} tone={kpi.alarms > 0 ? "danger" : "ok"} />
-            <Kpi label="Daya Live" value={`${kpi.totalPower.toFixed(0)} W`} sub="jumlah pack live" />
-            <Link href={kpi.worst && kpi.worst.delta > 0 ? `/devices/${kpi.worst.d.id}` : "#"} className="block">
-              <Kpi label="Imbalance Terburuk" value={kpi.worst && kpi.worst.delta > 0 ? `${kpi.worst.delta} mV` : "—"} sub={kpi.worst && kpi.worst.delta > 0 ? (kpi.worst.d.name || kpi.worst.d.serialNumber) : "aman"} tone={kpi.worst && kpi.worst.delta > 50 ? "danger" : "default"} />
+            <Kpi label="Alarm Aktif" value={String(kpi.activeAlarmCount)} sub="device live" tone={kpi.activeAlarmCount > 0 ? "danger" : "ok"} />
+            <Kpi label="Daya Net" value={`${kpi.netW > 0 ? "+" : ""}${kpi.netW.toFixed(0)} W`} sub={`${kpi.chargeW.toFixed(0)} W in · ${kpi.dischargeW.toFixed(0)} W out`} />
+            <Link href={kpi.worst && kpi.worst.deltaMv > 0 ? `/devices/${kpi.worst.device.id}` : "#"} className="block">
+              <Kpi
+                label="Imbalance Terburuk"
+                value={kpi.worst && kpi.worst.deltaMv > 0 ? `${kpi.worst.deltaMv} mV` : "—"}
+                sub={kpi.worst && kpi.worst.deltaMv > 0 ? (kpi.worst.device.name || kpi.worst.device.serialNumber) : "aman (live)"}
+                tone={kpi.worst && kpi.worst.deltaMv > 50 ? "danger" : "default"}
+              />
             </Link>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+            <div className="xl:col-span-2">
+              <CellWall devices={devices} nowMs={now} />
+            </div>
+            <NeedsAttention devices={devices} summaries={summaries} />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <HealthDistribution devices={devices} summaries={summaries} />
+            <LiveEventFeed devices={devices} summaries={summaries} nowMs={now} />
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {devices.map((d) => (
-              <DeviceCard key={d.id} device={d} variant="compact" nowMs={now} spark={sparkById.get(d.id)} />
+              <DeviceCard key={d.id} device={d} variant="compact" nowMs={now} spark={sparkById.get(d.id)} energyToday={energyTodayById.get(d.id)} />
             ))}
           </div>
         </>

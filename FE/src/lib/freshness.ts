@@ -43,6 +43,26 @@ export function formatAge(ageMs: number): string {
   return `${days}d ago`;
 }
 
+// Device (atau subset)-nya, terstruktural — bukan import Device dari types/device — supaya
+// freshness.ts tetap tanpa dependency ke lapisan tipe domain.
+export type LastSeenSource = { lastSeen: string | null; packs: readonly { updatedAt: string }[] };
+
+// Resolusi lastSeen dengan fallback: Device.lastSeen (kolom server, akurat) bila ada; kalau null
+// (mis. device berhenti kirim sebelum kolom ini ditambahkan di Fase A.5) fallback ke
+// max(pack.updatedAt) — supaya "last known" tetap dibedakan dari device yang BENAR-BENAR belum
+// pernah kirim data sama sekali (packs kosong). SATU implementasi dipakai DeviceDetail +
+// deviceSummary (Dashboard/My Devices) — jangan duplikasi logika ini di tempat lain.
+export function resolveLastSeenMs(device: LastSeenSource): number | null {
+  if (device.lastSeen) return new Date(device.lastSeen).getTime();
+  if (device.packs.length === 0) return null;
+  return Math.max(...device.packs.map((p) => new Date(p.updatedAt).getTime()));
+}
+
+// true hanya bila device belum PERNAH mengirim data sama sekali (bukan sekadar offline/last-known).
+export function hasNeverReportedData(device: LastSeenSource): boolean {
+  return device.lastSeen == null && device.packs.length === 0;
+}
+
 // Label & warna semantik konsisten untuk tiap status.
 export const FRESHNESS_META: Record<
   Freshness,

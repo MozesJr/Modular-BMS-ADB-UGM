@@ -10,6 +10,7 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/authz";
+import { computeEnergyToday } from "@/lib/energy";
 
 const DEFAULT_HOURS = 6;
 const MAX_HOURS = 24 * 7;
@@ -51,11 +52,13 @@ export async function GET(req: Request) {
   const ids = devices.map((d) => d.id);
   const packCountById = new Map(devices.map((d) => [d.id, d.packs.length]));
 
-  // 2) Dua query GROUP BY (device, bucket) — delta cell & rata-rata daya. Hanya untuk id di atas.
+  // 2) Dua query GROUP BY (device, bucket) — delta cell & rata-rata daya — plus energi hari ini
+  // (sejak 00:00 WIB, lihat lib/energy.ts). Hanya untuk id di atas.
   let deltaRows: DeltaRow[] = [];
   let powerRows: PowerRow[] = [];
+  let energyToday: Awaited<ReturnType<typeof computeEnergyToday>> = { sinceUtc: new Date().toISOString(), byDevice: new Map() };
   if (ids.length > 0) {
-    [deltaRows, powerRows] = await Promise.all([
+    [deltaRows, powerRows, energyToday] = await Promise.all([
       prisma.$queryRaw<DeltaRow[]>`
         SELECT "deviceId", date_bin(${bucketInterval}, "recordedAt", ${from}) AS bucket,
                MIN("voltage") AS mn, MAX("voltage") AS mx
@@ -70,6 +73,7 @@ export async function GET(req: Request) {
         WHERE "deviceId" IN (${Prisma.join(ids)}) AND "recordedAt" >= ${from}
         GROUP BY "deviceId", bucket
         ORDER BY bucket ASC`,
+      computeEnergyToday(ids),
     ]);
   }
 
@@ -102,6 +106,7 @@ export async function GET(req: Request) {
   const result = devices.map((d) => {
     const cellCount = d.packs.reduce((sum, p) => sum + p._count.cells, 0);
     const spark = Array.from(sparkByDevice.get(d.id)?.values() ?? []).sort((a, b) => a.t.localeCompare(b.t));
+    const energy = energyToday.byDevice.get(d.id);
     return {
       id: d.id,
       serialNumber: d.serialNumber,
@@ -111,8 +116,10 @@ export async function GET(req: Request) {
       packCount: d.packs.length,
       cellCount,
       spark,
+      energyTodayInWh: energy?.energyInWh ?? 0,
+      energyTodayOutWh: energy?.energyOutWh ?? 0,
     };
   });
 
-  return NextResponse.json({ hours, bucketSeconds, devices: result });
+  return NextResponse.json({ hours, bucketSeconds, energyToday: { sinceUtc: energyToday.sinceUtc }, devices: result });
 }

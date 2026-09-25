@@ -8,3 +8,8 @@
 # hasil curl -c / cookie jar lokal: jangan pernah di-commit
 cookies*.txt
 *.credentials
+
+# simulator dev lokal dijalankan langsung di host (bukan cuma via Docker) saat testing —
+# node_modules/lockfile-nya tidak perlu ikut repo (Dockerfile sudah build sendiri).
+tools/simulator/node_modules/
+tools/simulator/package-lock.json

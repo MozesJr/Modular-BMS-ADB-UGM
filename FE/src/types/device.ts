@@ -97,8 +97,16 @@ export type DeviceSummaryItem = {
   packCount: number;
   cellCount: number;
   spark: DeviceSparkPoint[];
+  // Energi hari ini (sejak 00:00 WIB), integrasi trapezoid daya — lihat energyToday.sinceUtc.
+  energyTodayInWh: number; // charge, positif
+  energyTodayOutWh: number; // discharge, positif
 };
-export type DevicesSummary = { hours: number; bucketSeconds: number; devices: DeviceSummaryItem[] };
+export type DevicesSummary = {
+  hours: number;
+  bucketSeconds: number;
+  energyToday: { sinceUtc: string };
+  devices: DeviceSummaryItem[];
+};
 
 // --- Real-time (payload event "bms:update" lewat WS /ws) ---
 export type BmsUpdatePayload = {

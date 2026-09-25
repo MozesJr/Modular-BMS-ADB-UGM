@@ -119,6 +119,7 @@ Device auto-provisioned `ownerId=null` → klaim lewat POST `/api/devices` (atau
 | D | My Devices (DeviceCard detailed, filter/search/sort) | ✅ |
 | E | Polish & hardening (command palette, skeleton, error/retry, 404, WS indicator, energy in/out, summary endpoint + sparkline, hapus template cruft) | ✅ |
 | Integrasi | Merge dengan `feat/mobile-api-v1` (branch `integrate/redesign`) — lihat §8–11 | ✅ lokal, belum di-push. Migrasi VPS **belum dijalankan** (prosedur §9 siap, perlu dieksekusi manual). |
+| Fleet Dashboard v2 | Redesign Dashboard (Fleet Overview): 3 bug data + 6 fitur baru + kontrak energi hari ini — lihat §12 | ✅ branch `feat/fleet-dashboard-v2` (belum di-push) |
 
 ## 5b. Fase E — detail
 - **Command palette** ⌘K/Ctrl+K (`CommandPalette`): lompat device (nama/ID), halaman, toggle tema. Keyboard-first (↑↓/↵/esc), fokus dikembalikan, satu global keydown (⌘K, preventDefault).
@@ -265,3 +266,50 @@ Endpoint `/api/v1/*` (dipakai Flutter): `auth/{login,logout,logout-all,refresh}`
 Satu-satunya efek tidak langsung: kolom baru `Device.lastSeen` otomatis ikut ter-serialize di respons **web** `GET /api/devices` & `GET /api/devices/[id]` (route itu meng-`include` seluruh model `Device` tanpa `select`) — perubahan **aditif**, bukan breaking. **Tidak memengaruhi v1**: route v1 memakai DTO eksplisit (`device-dto.ts`) dengan daftar field tetap (`id,serialNumber,name,verified,role,owner,online,lastSeenAt,packCount,...`) yang tidak menyertakan `Device.lastSeen` — mereka sudah punya konsep freshness sendiri (`lastSeenAt`/`online`, diturunkan dari `Pack.receivedAt`/`updatedAt`, threshold default 180 detik via `device-view.ts`).
 
 **Diverifikasi hidup** (stack lokal, migrasi dari kosong, simulator 3 device): `POST /api/v1/auth/login` → access+refresh token; `GET /api/v1/devices` (Bearer) → daftar device dengan `summary` per pack (voltageV/currentA/powerW/temperatureC/cellDeltaMv) — shape utuh, tidak berubah; `GET /api/v1/me` → profil user. Juga: `GET /api/devices` (web), `GET /api/devices/[id]` (Twin+gauges+cell balance), `GET /api/devices/[id]/history?hours=6|24|168` (envelope, bucketSeconds 30/120/900, energyIn/Out/Wh terisi), `GET /api/devices/summary?hours=6` (sparkline dashboard) — semua 200 dengan data nyata dari 3 device simulator, dan `Device.lastSeen` terisi (bukti transaksi `ingest.ts` yang dimodifikasi berjalan benar). `npm run test:db` (17 file, 180 test, termasuk `ingest.db.test.ts`+`history.db.test.ts`+`token-sessions.db.test.ts`) semua lolos setelah merge.
+
+## 12. Fleet Dashboard v2 (branch `feat/fleet-dashboard-v2`)
+
+Redesign Dashboard (Fleet Overview) — TANPA angka palsu/placeholder, semua dari `/api/devices` + `/api/devices/summary` + WS `bms:update`. Branch dari `main`, belum di-push.
+
+### 12a. Bug data diperbaiki
+
+| # | Bug | Root cause | Fix |
+|---|---|---|---|
+| 1 | Kartu offline bilang "belum ada data" walau ada nilai terakhir | `deviceSummary()` (dulu di `DeviceCard.tsx`) cuma pakai `Device.lastSeen` mentah; `DeviceDetail.tsx` sudah punya fallback `max(pack.updatedAt)` tapi tidak dipakai di jalur Dashboard | `resolveLastSeenMs()` + `hasNeverReportedData()` baru di `lib/freshness.ts` — SATU implementasi dipakai `DeviceDetail` **dan** `lib/deviceSummary.ts`. Kartu sekarang beda tegas: `neverReported` → nilai disembunyikan ("Device belum pernah mengirim data"); offline dengan last-known → label "Last known · <umur>" + nilai diredupkan |
+| 2 | KPI "Alarm Aktif"/"Imbalance Terburuk" ikut hitung device offline | Reduce di `FleetDashboard.tsx` tanpa filter freshness; `evaluateSnapshot` menyuntik pseudo-alarm `rule:"offline"` yang ikut ke-count | `deviceSummary.realAlarms` (exclude `rule==="offline"`); `lib/fleetKpi.ts` hanya agregasi dari device **live** (`activeAlarmCount`, `chargeW`/`dischargeW`, `worst` imbalance). Offline dihitung terpisah (`offlineCount`) sebagai status, bukan imbalance aktif |
+| 3 | "Daya Live" tanpa arah | Sum `pack.power` mentah (charge & discharge saling meniadakan) | `fleetKpi.chargeW`/`dischargeW`/`netW` (split by sign, konvensi current negatif = charging), ditampilkan terpisah + net di Fleet Pulse & KPI strip |
+
+### 12b. Komponen baru (`FE/src/components/bms/`)
+
+`FleetPulse` (hero: charge/discharge/net, SVG energy-flow reuse `.twin-flow`/`useReducedMotion` dari BatteryTwin, bar live/stale/offline, ticker packet terakhir, energi hari ini), `CellWall` (heatmap live+last-known per device→pack, hatch overlay untuk non-live, device offline >24j collapsed default, klik→detail), `NeedsAttention` (prioritas alarm>stale>offline>nearing-threshold), `HealthDistribution` (bar health terurut), `LiveEventFeed` (buffer 50 event WS: packet throttled + transisi freshness + alarm muncul/hilang, dihitung FE karena backend cuma broadcast `bms:update`).
+
+`DeviceCard` (compact v2): panah arah+daya (`↑`/`↓` + W), freshness jujur (fix bug 1), chip alarm pakai `realAlarms`, sparkline & cell-strip lama tetap.
+
+### 12c. Util baru/diperluas (reuse, bukan duplikasi)
+
+`lib/deviceSummary.ts` (diekstrak dari `DeviceCard.tsx`, dipakai semua komponen `bms/*` + `DeviceCard`), `lib/fleetKpi.ts` (`computeFleetKpi`). **Tidak** ada cache lintas-render manual (ref-during-render dilarang oleh `react-hooks/refs` eslint rule proyek ini) — komponen berat per-device (`CellWall`, `DeviceCard`) menghitung `deviceSummary()` sendiri dari props `{device, nowMs}` dan di-`React.memo`, supaya update WS satu device tidak memaksa re-render device lain; komponen agregat (KPI, Needs Attention, Health Distribution, Live Event Feed) memakai `Map` yang dihitung `useMemo` murni per render.
+
+### 12d. Kontrak baru: `GET /api/devices/summary` — energi hari ini
+
+```jsonc
+{
+  "hours": 6, "bucketSeconds": 360,
+  "energyToday": { "sinceUtc": "2026-09-20T17:00:00.000Z" }, // batas 00:00 WIB, dihitung DI SQL
+  "devices": [{ "...": "...", "energyTodayInWh": 25.3, "energyTodayOutWh": 18.1 }]
+}
+```
+Implementasi `BE/src/lib/energy.ts` (`computeEnergyToday`): batas hari `date_trunc('day', now() AT TIME ZONE 'Asia/Jakarta') AT TIME ZONE 'Asia/Jakarta'` (SQL, bukan JS — hindari skew timezone app server; `now()` overridable via param `{now}` khusus untuk tes deterministik). Integrasi trapezoid daya **sama** dengan `devices/[id]/history/route.ts` (`ENERGY_GAP_S` di-share dari `lib/energy.ts`, history route tak lagi punya konstanta sendiri) — bedanya, segmen yang melintasi batas 00:00 WIB **dipotong** (interpolasi linear power di titik potong), bukan didrop seperti `/history`. Aturan gap (>2× interval sampling) tetap dievaluasi dari segmen penuh, sebelum dipotong. Akses identik `/api/devices` (owner ATAU collaborator). Test: `BE/src/lib/energy.db.test.ts` (5 test — sinceUtc, segmen lintas batas, gap tetap didrop, charge vs discharge terpisah, filter deviceIds).
+
+### 12e. Keputusan & asumsi
+
+- "Live" untuk semua KPI/Fleet Pulse/worst-imbalance = `freshness.status === "live"` saja (bukan live+stale) — dikonfirmasi user.
+- Cell Wall: device offline >24 jam collapsed default (bisa di-expand), dibedakan visual dari live via hatch overlay + label umur data (bukan warna saja — kontras 4.5:1 dijaga di teks).
+- Energi hari ini ditampilkan ringkas (total fleet di Fleet Pulse, per-device di tooltip stat "Daya" pada `DeviceCard`) — bukan komponen tersendiri, karena prioritas terendah di scope.
+- Tanpa dependency baru: ApexCharts sudah ada di `package.json` tapi tidak dipakai (semua visual baru = SVG/CSS custom, konsisten dengan `BatteryTwin`).
+
+### 12f. Verifikasi
+
+- `npx tsc --noEmit` bersih (FE & BE), `next build` bersih (FE & BE, Node 22).
+- `npm run test:db` BE: 185/185 lolos (termasuk 5 test energi baru + suite existing tak ada regresi dari refactor `history/route.ts`).
+- `eslint .` (FE): nol error/warning baru dari kode branch ini; error `react-hooks/set-state-in-effect`/`react-hooks/purity` yang tersisa (`FleetDashboard.tsx` baris `load(ref)`, `DeviceCard.tsx` default param `nowMs = Date.now()`) **pre-existing di `main`** (dikonfirmasi via `git diff main`), di luar scope task ini.
+- Diuji hidup di stack lokal (`docker-compose.dev.yml` + simulator `DEVICE_COUNT` 3→2): 3 device live normal (Fleet Pulse/Cell Wall/Health Distribution/Live Event Feed semua terisi data nyata) → satu device (`DEV-SIM-003`) dimatikan (simulator host diganti ke 2 device) → transisi live→stale→offline teramati real-time di UI (badge, Cell Wall hatch, Needs Attention, Live Event Feed) tanpa reload. Imbalance mendekati/​melewati ambang (15% chance/tick di simulator) teramati di "Imbalance Terburuk" & Needs Attention. Light/dark/390px diverifikasi.
