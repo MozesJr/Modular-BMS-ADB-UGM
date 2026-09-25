@@ -3,7 +3,7 @@
 Branch kerja: **`feat/ui-redesign`** (jangan push ke `main`; push memicu CI/CD auto-deploy).
 Commit per fase: `fase-a`, `fase-a5`, `fase-b`, `fase-c-d`.
 
-> Diperbarui di akhir tiap fase. Terakhir: Fase E (polish & hardening).
+> Diperbarui di akhir tiap fase. Terakhir: integrasi `feat/ui-redesign` ↔ `feat/mobile-api-v1` (branch `integrate/redesign`, belum di-push/merge).
 
 ---
 
@@ -118,6 +118,7 @@ Device auto-provisioned `ownerId=null` → klaim lewat POST `/api/devices` (atau
 | C | Dashboard fleet (KPI nyata, DeviceCard, hapus dummy) | ✅ |
 | D | My Devices (DeviceCard detailed, filter/search/sort) | ✅ |
 | E | Polish & hardening (command palette, skeleton, error/retry, 404, WS indicator, energy in/out, summary endpoint + sparkline, hapus template cruft) | ✅ |
+| Integrasi | Merge dengan `feat/mobile-api-v1` (branch `integrate/redesign`) — lihat §8–11 | ✅ lokal, belum di-push. Migrasi VPS **belum dijalankan** (prosedur §9 siap, perlu dieksekusi manual). |
 
 ## 5b. Fase E — detail
 - **Command palette** ⌘K/Ctrl+K (`CommandPalette`): lompat device (nama/ID), halaman, toggle tema. Keyboard-first (↑↓/↵/esc), fokus dikembalikan, satu global keydown (⌘K, preventDefault).
@@ -128,32 +129,122 @@ Device auto-provisioned `ownerId=null` → klaim lewat POST `/api/devices` (atau
 
 ## 6. TODO terbuka
 
-- [ ] **Apply migration `20260924190000_packhistory_current_power` ke DB VPS** (user handle). `/history` 500 sampai kolom ada.
-- [ ] Verifikasi duplikasi `PackHistory` (dev+prod subscribe broker sama) — query tertunda (tunnel putus). Gunakan stack lokal agar dev berhenti menulis ke prod.
+- [ ] **Apply migration ke DB VPS** dengan prosedur rekonsiliasi khusus (bukan `migrate deploy` polos) — lihat §8c. Sampai ini dijalankan, `/history` & `/summary` di prod masih memakai kode lama (branch belum di-push/merge ke `main`).
+- [ ] Verifikasi duplikasi `PackHistory` (dev+prod subscribe broker sama) — kini **sebagian terjawab**: migrasi mobile `ingestion_idempotency` menambah unique constraint `(deviceId,packIndex,recordedAt)` dan ingest pakai `createMany({ skipDuplicates: true })`, jadi redelivery/duplikat dari broker yang sama otomatis idempoten setelah migration ini di-apply ke VPS. Query pengukuran langsung masih tertunda (tunnel putus).
 - [ ] Kalibrasi `LIFEPO4_OCV_SOC` dari data sel asli.
 - [ ] Opsional: alarm persistence backend (timeline lintas reload) — kini FE-only.
-- [ ] **Merge** dengan `feat/mobile-api-v1` — lihat §8 (rekonsiliasi migration telemetry & `client.ts` & `history/route.ts`).
-- [ ] **CI belum menjalankan `prisma migrate deploy`** — lihat §9.
+- [ ] Pertimbangkan pakai `PackRollup1m`/`CellRollup1m` (mobile) untuk `/history` bila UI kelak butuh rentang >30 hari — lihat keputusan §8b (untuk sekarang sengaja TIDAK dipakai).
+- [x] ~~Merge dengan `feat/mobile-api-v1`~~ — **selesai**, lihat §8 (branch `integrate/redesign`, belum di-push).
+- [ ] **CI belum menjalankan `prisma migrate deploy`** — diusulkan di §9 (diff, belum di-commit).
 
 ## 7. Template TailAdmin dihapus (Fase E)
 Route demo (tak dipakai, hanya di sidebar yang di-comment): `/bar-chart`, `/line-chart`, `/form-elements`, `/basic-tables`, `/blank`, `/calendar`, `/alerts`, `/avatars`, `/badge`, `/buttons`, `/images`, `/modals`, `/videos`. **`/profile` DIPERTAHANKAN** (dipakai UserDropdown).
 Komponen demo (0 importer setelah route dihapus): `components/ecommerce/*`, `components/charts/*`, `components/example/*`, `components/videos/*`, `components/calendar/*`, `components/form/form-elements/*`, `components/ui/video/*`, `components/ui/images/*`, `components/tables/*` (BasicTableOne, Pagination), `components/common/{ChartTab,PageBreadCrumb,ComponentCard}.tsx`, `components/form/MultiSelect.tsx`.
 Dipertahankan (masih dipakai): `common/GridShape` (auth/error), `form/date-picker`, semua `ui/{badge,button,dropdown,modal,table,alert,avatar}`, `user-profile/*`, `form/input/*`.
 
-## 8. Persiapan merge: `feat/ui-redesign` ↔ `feat/mobile-api-v1`
-**File bentrok** (diubah di kedua branch): `schema.prisma`, `mqtt/client.ts`, `server.ts`, `app/api/devices/[id]/history/route.ts`, `app/api/devices/{route,[id]/route}.ts`, `types/device.ts`, `PackCard.tsx`, `page.tsx`, `package.json`, `Dockerfile`, env examples, `.gitignore`, + 5 `Bms*` dummy (delete/modify: ui-redesign menghapus, mobile-api-v1 mengubah).
-**Migration tumpang tindih (KRITIS):** mobile-api-v1 punya `20260921140000_history_current_power_and_indexes` (sudah menambah `PackHistory.current/power` + index) dan `20260921130000_ingestion_idempotency` + `20260922110000_add_history_rollups`. ui-redesign punya `20260924180000_telemetry_perf_and_lastseen` + `20260924190000_packhistory_current_power`. → **`packhistory_current_power` akan gagal** (kolom sudah ada) bila kedua branch digabung apa adanya.
-**Rekomendasi:** merge/rebase **`feat/mobile-api-v1` dulu** (fondasi auth + idempotency), lalu rebase `feat/ui-redesign` di atasnya sambil: (a) **hapus** `packhistory_current_power` (redundan) & dedupe index di `telemetry_perf_and_lastseen` (sisakan hanya `lastSeen` + index yang belum ada, pakai `IF NOT EXISTS`); (b) merge manual `client.ts` (idempotency mobile + perf ui) & `history/route.ts` (rollups mobile + date_bin/energy ui); (c) `lastSeen` unik milik ui-redesign — pertahankan. `ingestion_idempotency` (unique constraint history) juga **menyelesaikan** TODO duplikasi.
+## 8. Integrasi `feat/ui-redesign` ↔ `feat/mobile-api-v1` — SELESAI
 
-## 9. Checklist deploy
-- **CI `deploy.yml` TIDAK menjalankan `prisma migrate deploy`** (hanya `git pull` + `docker compose up --build`). Usul (jangan commit dulu) — tambah langkah setelah `up`:
-  ```yaml
-              docker compose up -d --build
-  +           docker compose exec -T backend npx prisma migrate deploy
-              docker image prune -f
+Branch **`integrate/redesign`** dibuat dari `feat/mobile-api-v1`, lalu `feat/ui-redesign` di-**merge** (bukan rebase) ke atasnya. **Belum di-push.**
+
+**Kenapa merge, bukan rebase:** mobile-api-v1 menulis ulang backend secara mendalam (`mqtt/ingest.ts`+`schema.ts`+`timestamp.ts`, wrapper `lib/authz.ts`+`lib/http.ts`, API v1 penuh, 180 test) sedangkan commit ui-redesign menyentuh BE hanya di beberapa file per fase. Rebase akan mereplay tiap commit ui-redesign di atas basis yang terus berubah dan memaksa resolusi konflik berulang untuk file yang sama (`client.ts`, `server.ts`, `history/route.ts` muncul di 3 commit ui-redesign berbeda). Merge menyelesaikan tiap file **tepat sekali**.
+
+### 8a. Resolusi konflik non-trivial
+
+| File | Konflik | Resolusi |
+|---|---|---|
+| `mqtt/client.ts` | Redesign menulis DB langsung (cache id + antrian + raw upsert); mobile split jadi `client.ts`(parse+validasi)+`ingest.ts`(queue+persist)+`schema.ts`+`timestamp.ts` | Ambil **mobile utuh** — superset (validasi schema, `resolveRecordedAt`, structured logger, keyed queue). Kode ingest redesign dibuang total. |
+| `mqtt/ingest.ts` | Tidak konflik git (file murni mobile) tapi **perlu tambahan**: `Device.lastSeen` (satu-satunya hal di redesign yang tak dimiliki mobile) | Tambah 1 statement `UPDATE "Device" SET "lastSeen"=...` di awal transaksi `persistSnapshot`, dengan staleness-guard sama seperti `Pack.recordedAt` (`WHERE lastSeen IS NULL OR lastSeen <= receivedAt`). Diverifikasi: 9 test `ingest.db.test.ts` tetap hijau. |
+| `server.ts` | Redesign fix DEP0169 (`handle(req,res)` tanpa `parsedUrl`); mobile graceful-shutdown lengkap tapi masih pakai `url.parse` | Ambil **mobile utuh** untuk shutdown/health/PEER_HEADER, tapi **drop** `import { parse } from "url"` + panggilannya — pakai `handle(req, res)` polos (Next terima tanpa parsedUrl). |
+| `schema.prisma` (`PackHistory`/`CellHistory`) | Redesign nambah `current`/`power`+index; mobile nambah itu **plus** `receivedAt`, unique index idempotensi | Ambil **mobile utuh** (superset). `Device.lastSeen` (bagian yang tak konflik) tetap masuk. |
+| `prisma/migrations` | Lihat §8b | — |
+| `devices/[id]/history/route.ts` | Redesign: kontrak bucket `date_bin` baru (envelope+energi); mobile: route lama tak berubah, hanya dibungkus `route()`/`assertCanView` | **Pertahankan kontrak redesign**, tapi bungkus dengan `route()`+`assertCanView` milik mobile (format error `{error:{code,message}}` + 404/403 terpusat, konsisten dgn seluruh API). Rollup mobile **tidak dipakai** — lihat §8b. |
+| `(admin)/page.tsx` + 4 `Bms*.tsx` | Redesign hapus semua (ganti `FleetDashboard`); mobile perbaiki `BmsSystemMetrics` (pakai `/api/v1/dashboard/summary`) tapi `BmsPowerFlowChart`/`BmsVoltageTrendChart` masih eksplisit berkomentar "DEMO: data contoh" | Ambil **redesign** (`FleetDashboard`, data nyata penuh dari `/api/devices`+`/api/devices/summary`, tanpa dummy). Endpoint `/api/v1/dashboard/summary` yang dikonsumsi `BmsSystemMetrics` **tetap ada** untuk mobile app — hanya konsumen web-nya yang dihapus. |
+| `PackCard.tsx` | Redesign restrukturisasi total (Twin+CellBalance); mobile tambah prop `emptyText`/`emptyTitle` di satu gauge Suhu (`Gauge.tsx`, tak konflik) | Pertahankan struktur redesign, porting `emptyText="Error"` ke gauge Suhu di lokasi barunya (beda sensor error vs 0 °C). |
+| `devices/route.ts`, `devices/[id]/route.ts`, `types/device.ts`, `Gauge.tsx`, `package.json`, `Dockerfile`, `next.config.ts`, `lib/api.ts` | — | **Auto-merged bersih oleh git**, diverifikasi manual satu-satu: pola `route()`/zod mobile + fix `orderBy` pack/cell redesign sama-sama utuh; `engines`, `node:22`, `/api/v1` rewrite, `ApiError{code,message}` parsing semua ada. |
+
+### 8b. Keputusan: TIDAK memakai `PackRollup1m`/`CellRollup1m` untuk `/history`
+
+Mobile punya tabel rollup 1-menit + `scripts/retention.ts` (hapus raw >30 hari). `/history` redesign tetap membaca `PackHistory`/`CellHistory` **raw** untuk semua rentang (6j/24j/7hari), TIDAK fallback ke rollup. Alasan:
+1. Retensi raw 30 hari sudah menutupi seluruh rentang yang dipakai UI (maksimal 7 hari) — tidak ada baris yang hilang.
+2. Rollup hanya terisi lewat `node dist/scripts/retention.js --execute`, yang **tidak terjadwal otomatis** (dijalankan manual/cron eksternal, belum ada di compose manapun). Memakainya sebagai sumber utama berisiko silent-empty-result di dev/staging/VPS baru sebelum cron pertama jalan.
+3. `prisma migrate diff` & test suite membuktikan raw-only sudah benar untuk kontrak saat ini.
+**TODO** bila UI kelak menambah opsi rentang >30 hari: tambah fallback ke rollup untuk porsi `recordedAt < now-30d`, dengan agregasi berbobot `samples` (rollup sudah menyimpan `count` per metrik untuk itu).
+
+### 8c. Migration: rekonsiliasi & verifikasi
+
+**Dihapus:** `20260924190000_packhistory_current_power` — kolom `current`/`power` di `PackHistory` sudah ditambah migrasi mobile `20260921140000_history_current_power_and_indexes`, jadi 100% redundan.
+
+**Dikurangi:** `20260924180000_telemetry_perf_and_lastseen` — semula juga membuat index `PackHistory_deviceId_recordedAt_idx` & `CellHistory_deviceId_recordedAt_idx`, yang NAMA DAN DEFINISINYA SAMA PERSIS dengan yang dibuat migrasi mobile `20260921140000_history_current_power_and_indexes`. Kedua `CREATE INDEX` itu **dihapus** dari migrasi ini — yang tersisa hanya `ALTER TABLE "Device" ADD COLUMN "lastSeen"`.
+
+**Verifikasi migration chain (dijalankan, bukan asumsi):**
+```bash
+# 1. Replay 11 migrasi dari kosong ke DB sekali-pakai -> harus sukses tanpa error
+DATABASE_URL=<db-kosong> npx prisma migrate deploy
+# hasil: "All migrations have been successfully applied." (11 folder, urutan benar)
+
+# 2. Diff hasil replay vs schema.prisma final -> HARUS KOSONG
+npx prisma migrate diff --from-url <db-kosong> --to-schema-datamodel ./prisma/schema.prisma --script
+# hasil: "-- This is an empty migration."
+```
+Kedua-duanya **sudah dijalankan dan lolos** (lihat riwayat kerja sesi ini) — migration chain terbukti benar untuk DB yang belum pernah disentuh (mis. `postgres-dev` di stack lokal, atau DB VPS baru).
+
+**⚠️ DB VPS bukan "DB kosong"** — di Fase A.5, migrasi `20260924180000_telemetry_perf_and_lastseen` versi LAMA (dengan 2 `CREATE INDEX` yang sekarang dihapus) **sudah pernah di-apply langsung ke DB VPS** (lewat SSH tunnel). Akibatnya VPS punya kolom `lastSeen` **dan** kedua index itu, tapi belum satupun migrasi mobile. Ini diverifikasi persis (bukan tebakan) dengan mereplika state itu di DB sekali-pakai lokal: `prisma migrate deploy` di atas state itu **gagal P3018** persis di migrasi `20260921140000_history_current_power_and_indexes` — `relation "PackHistory_deviceId_recordedAt_idx" already exists`. Prosedur remediasi lengkap (diuji sampai lolos + `migrate status` "up to date" + `migrate diff` kosong) ada di §9.
+
+## 9. Migrasi ke DB VPS — perintah persis (jalankan MANUAL, satu kali)
+
+Ini prosedur **rekonsiliasi satu-kali** (bukan `migrate deploy` polos) karena state khusus VPS di §8c. Sudah diuji sampai lolos di replika lokal DB VPS (bukan asumsi). Jalankan dari VPS, di direktori project (mis. `/home/Modular-BMS-ADB-UGM`), **setelah** kode branch ini ada di sana (`git pull`) tapi **sebelum** merestart service `backend`:
+
+```bash
+# 0. Lihat status SEBELUM — harus tampil 5 migrasi mobile "not yet applied", TANPA error.
+docker compose --profile tools run --rm backend-migrate npx prisma migrate status
+
+# 1. Migrasi 20260921140000_history_current_power_and_indexes akan gagal (P3018: index sudah ada) —
+#    migrasi lama pernah dijalankan manual ke DB ini (Fase A.5) dan sudah membuat index bernama SAMA.
+#    Hapus index duplikat itu dulu (aman: migrasi mobile akan membuatnya ulang tepat setelah ini):
+cat <<'SQL' > /tmp/drop-dup-idx.sql
+DROP INDEX IF EXISTS "PackHistory_deviceId_recordedAt_idx";
+DROP INDEX IF EXISTS "CellHistory_deviceId_recordedAt_idx";
+SQL
+docker compose --profile tools run --rm -v /tmp/drop-dup-idx.sql:/tmp/drop-dup-idx.sql:ro \
+  backend-migrate npx prisma db execute --schema prisma/schema.prisma --file /tmp/drop-dup-idx.sql
+
+# 2. Jalankan migrasi (skenario NORMAL setelah langkah 1: lolos semua, lanjut ke langkah 4)
+docker compose --profile tools run --rm backend-migrate
+
+# 3. HANYA JIKA langkah 2 masih gagal P3018 di migrasi yang sama (mis. langkah 1 belum sempat jalan):
+#    tandai upaya yang gagal itu sebagai rolled-back (transaksinya memang sudah di-rollback oleh Postgres),
+#    lalu ulangi langkah 2.
+docker compose --profile tools run --rm backend-migrate \
+  npx prisma migrate resolve --rolled-back 20260921140000_history_current_power_and_indexes
+docker compose --profile tools run --rm backend-migrate
+
+# 4. Verifikasi SESUDAH — harus persis: "Database schema is up to date!"
+docker compose --profile tools run --rm backend-migrate npx prisma migrate status
+
+# 5. Baru sekarang restart backend (image baru + prisma client baru)
+docker compose down
+docker compose up -d --build
+docker image prune -f
+```
+
+Migrasi setelah ini (yang tidak punya sejarah "diterapkan manual" seperti kasus di atas) cukup `docker compose --profile tools run --rm backend-migrate` biasa — langkah 1/3 di atas adalah **khusus untuk transisi ini saja**, jangan dijadikan bagian permanen dari `deploy.yml`.
+
+## 10. Checklist & usulan deploy.yml
+
+- **CI `deploy.yml` TIDAK menjalankan migrasi apa pun** (hanya `git pull` + `docker compose up --build`). Service `backend-migrate` (profile `tools`) sudah ada di `BE/docker-compose.yml` (dibuat mobile-api-v1) tapi tidak pernah dipanggil otomatis. Usul diff (belum di-commit; jalankan §9 manual dulu untuk migrasi PERTAMA kali karena butuh langkah rekonsiliasi, baru tambahkan langkah ini untuk migrasi-migrasi berikutnya):
+  ```diff
+   name: Deploy to VPS
+   ...
+             script: |
+               cd /home/Modular-BMS-ADB-UGM
+               git pull origin main
+  +           docker compose --profile tools run --rm backend-migrate
+               docker compose down
+               docker compose up -d --build
+               docker image prune -f
   ```
-  (atau jadikan entrypoint container: `prisma migrate deploy && node dist/server.js`; pastikan `prisma` CLI ada di image).
-- **Env baru di VPS:** `NEXT_PUBLIC_WS_URL=wss://<domain>/ws` (FE, saat build), pool params di `DATABASE_URL` (`?...&connection_limit=10&pool_timeout=20&connect_timeout=10`).
+  `backend-migrate` sudah dibangun dari stage `migrator` (punya Prisma CLI; image `runner` produksi sengaja tanpa itu) dan CMD default-nya persis `npx prisma migrate deploy`.
+- **Env baru di VPS:** `NEXT_PUBLIC_WS_URL=wss://<domain>/ws` (FE, saat build), pool params di `DATABASE_URL` (`?...&connection_limit=10&pool_timeout=20&connect_timeout=10`), **`JWT_ACCESS_SECRET`** (wajib sejak mobile-api-v1 — minimal 32 karakter, HARUS beda dari `NEXTAUTH_SECRET`; server menolak start tanpa ini, lihat `BE/src/lib/env-check.ts`).
 - **Nginx/Cloudflare Tunnel:** proxy upgrade WebSocket di path `/ws` ke backend:4000 —
   ```nginx
   location /ws {
@@ -166,3 +257,11 @@ Dipertahankan (masih dipakai): `common/GridShape` (auth/error), `form/date-picke
   }
   ```
   (Cloudflare Tunnel: aktifkan WebSocket; pastikan `wss://` di FE.)
+
+## 11. Kompatibilitas kontrak mobile (Flutter) — dikonfirmasi
+
+Endpoint `/api/v1/*` (dipakai Flutter): `auth/{login,logout,logout-all,refresh}`, `me`, `devices`, `devices/[id]`, `devices/[id]/history`, `devices/[id]/collaborators[/[userId]]`, `dashboard/summary`. **Tidak satu pun diubah** oleh integrasi ini — seluruh isi `app/api/v1/` murni ditambahkan dari `feat/mobile-api-v1`, tidak disentuh sisi redesign sama sekali (dikonfirmasi via diff, bukan asumsi).
+
+Satu-satunya efek tidak langsung: kolom baru `Device.lastSeen` otomatis ikut ter-serialize di respons **web** `GET /api/devices` & `GET /api/devices/[id]` (route itu meng-`include` seluruh model `Device` tanpa `select`) — perubahan **aditif**, bukan breaking. **Tidak memengaruhi v1**: route v1 memakai DTO eksplisit (`device-dto.ts`) dengan daftar field tetap (`id,serialNumber,name,verified,role,owner,online,lastSeenAt,packCount,...`) yang tidak menyertakan `Device.lastSeen` — mereka sudah punya konsep freshness sendiri (`lastSeenAt`/`online`, diturunkan dari `Pack.receivedAt`/`updatedAt`, threshold default 180 detik via `device-view.ts`).
+
+**Diverifikasi hidup** (stack lokal, migrasi dari kosong, simulator 3 device): `POST /api/v1/auth/login` → access+refresh token; `GET /api/v1/devices` (Bearer) → daftar device dengan `summary` per pack (voltageV/currentA/powerW/temperatureC/cellDeltaMv) — shape utuh, tidak berubah; `GET /api/v1/me` → profil user. Juga: `GET /api/devices` (web), `GET /api/devices/[id]` (Twin+gauges+cell balance), `GET /api/devices/[id]/history?hours=6|24|168` (envelope, bucketSeconds 30/120/900, energyIn/Out/Wh terisi), `GET /api/devices/summary?hours=6` (sparkline dashboard) — semua 200 dengan data nyata dari 3 device simulator, dan `Device.lastSeen` terisi (bukti transaksi `ingest.ts` yang dimodifikasi berjalan benar). `npm run test:db` (17 file, 180 test, termasuk `ingest.db.test.ts`+`history.db.test.ts`+`token-sessions.db.test.ts`) semua lolos setelah merge.
