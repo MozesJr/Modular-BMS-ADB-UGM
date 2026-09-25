@@ -16,11 +16,12 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
+          command_timeout: 30m
           script: |
             set -e
             cd /home/Modular-BMS-ADB-UGM
             git pull origin main
             docker compose build
-            docker compose --profile tools run --rm backend-migrate
+            docker compose --profile tools run --rm -T backend-migrate
             docker compose up -d
             docker image prune -f

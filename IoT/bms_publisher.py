@@ -1,194 +1,89 @@
-import json
-import os
-import sys
-import time
-import random
+import json, os, sys, time, random
 import paho.mqtt.client as mqtt
 
-# =========================================================
-# KONFIGURASI MQTT
-# =========================================================
-
-# Host broker, kredensial, dan device id dibaca dari environment (TIDAK ada nilai di repo).
-#   MQTT_BROKER_HOST (default 127.0.0.1)  MQTT_BROKER_PORT (default 1883)
-#   MQTT_USERNAME    (default esp32_device: ACL hanya mengizinkan akun ini MENERBITKAN bms/+/data)
-#   MQTT_PASSWORD    (WAJIB)              DEVICE_ID (default GAMA-BMS-PACK-001)
-BROKER = os.environ.get("MQTT_BROKER_HOST", "72.61.208.150")
-PORT = int(os.environ.get("MQTT_BROKER_PORT", "1883"))
-
-USERNAME = os.environ.get("MQTT_USERNAME", "bms_user")
-PASSWORD = os.environ.get("MQTT_PASSWORD", "BmsAdb2026Prod!")
-if not PASSWORD:
-    sys.exit("MQTT_PASSWORD wajib diisi lewat environment (jangan hardcode di file ini)")
-
+# Semua kredensial WAJIB dari environment — tidak ada default rahasia di file ini.
+BROKER    = os.environ.get("MQTT_BROKER_HOST", "72.61.208.150")
+PORT      = int(os.environ.get("MQTT_BROKER_PORT", "1883"))
+USERNAME  = os.environ.get("MQTT_USERNAME", "esp32_device")   # ACL: hanya akun ini boleh publish bms/+/data
+PASSWORD  = os.environ.get("MQTT_PASSWORD", "eo6eCnnnY1K2YrJ1PgDwLH6")
 DEVICE_ID = os.environ.get("DEVICE_ID", "GAMA-BMS-PACK-001")
+INTERVAL  = int(os.environ.get("PUBLISH_INTERVAL", "10"))     # samakan dgn ESP32; >20s = gap di chart
+
+if not PASSWORD:
+    sys.exit("MQTT_PASSWORD wajib diisi lewat environment")
 
 TOPIC = f"bms/{DEVICE_ID}/data"
-
-# Interval pengiriman dummy
-PUBLISH_INTERVAL = 60
-
-# =========================================================
-# KONFIGURASI PACK — 1 pack, 24 cell seri
-# =========================================================
-
 CELL_COUNT = 24
+V_MIN, V_MAX = 3.20, 3.45        # LiFePO4 area plateau
+CELL_OFFSET_MV = 8               # sebaran normal antar cell (±mV) -> delta ~15–25 mV
+CURRENT_MAX = 5.0                # ACS712-05B
 
-# Range voltage per cell. Dihitung dari formula SOC asli di FE (PackCard.tsx):
-# percent = ((avgCellVoltage - 3.0) / 1.2) * 100  [domain 3.0-4.2V, generik Li-ion]
-# 3.55-3.65V -> SOC 45.8%-54.2% (avg 3.6V -> tepat 50%). MAX dikunci di 3.65V,
-# batas aman LiFePO4 yang sama dipakai di annotation chart & zona gauge cell —
-# jangan dinaikkan lagi tanpa update batas aman itu juga.
-CELL_VOLTAGE_MIN = 3.55
-CELL_VOLTAGE_MAX = 3.65
-
-CURRENT_RANGE = 5.0  # ACS712-05B, ±5A
-
-
-# =========================================================
-# MQTT CALLBACK
-# =========================================================
+# offset tetap per cell (karakter sel), + random walk untuk tegangan dasar & arus
+offsets = [random.uniform(-CELL_OFFSET_MV, CELL_OFFSET_MV) / 1000 for _ in range(CELL_COUNT)]
+base_v = 3.30
+current = -2.0                   # negatif = charging
+temp = 26.0
 
 
-def on_connect(client, userdata, flags, rc):
-    if rc == 0:
-        print("[MQTT] Connected")
-    else:
-        print(f"[MQTT] Connection failed, rc={rc}")
+def step():
+    global base_v, current, temp
+    # arus berubah pelan, sesekali berbalik arah (charge <-> discharge)
+    current += random.uniform(-0.3, 0.3)
+    if random.random() < 0.02:
+        current = -current
+    current = max(-CURRENT_MAX, min(CURRENT_MAX, current))
+    # tegangan naik saat charging (arus negatif), turun saat discharge
+    base_v += -current * 0.0004 + random.uniform(-0.0005, 0.0005)
+    base_v = max(V_MIN, min(V_MAX, base_v))
+    temp += abs(current) * 0.01 - (temp - 26.0) * 0.05 + random.uniform(-0.1, 0.1)
 
-
-def on_disconnect(client, userdata, rc):
-    print(f"[MQTT] Disconnected, rc={rc}")
-
-
-def on_publish(client, userdata, mid):
-    print(f"[MQTT] Published, mid={mid}")
-
-
-# =========================================================
-# BUAT DUMMY DATA BMS
-# =========================================================
-
-
-def create_dummy_data():
-
-    cells = []
-
-    for i in range(1, CELL_COUNT + 1):
-        voltage = round(random.uniform(CELL_VOLTAGE_MIN, CELL_VOLTAGE_MAX), 3)
-        cells.append({"index": i, "voltage": voltage})
-
-    temperature = round(random.uniform(24.0, 28.0), 1)
-    balancer_connected = True
-    current = round(random.uniform(-CURRENT_RANGE, CURRENT_RANGE), 2)
-
-    data = {
-        "temperature": temperature,
-        "balancerConnected": balancer_connected,
-        "cells": cells,
-        "current": current,
-    }
-
-    return data
-
-
-# =========================================================
-# BUAT PAYLOAD MQTT
-# =========================================================
-
-
-def create_payload():
-
-    bms_data = create_dummy_data()
-
-    pack_voltage = sum(c["voltage"] for c in bms_data["cells"])
-    power = round(pack_voltage * bms_data["current"], 2)
-
-    payload = {
+    cells = [
+        {"index": i + 1, "voltage": round(base_v + offsets[i] + random.uniform(-0.002, 0.002), 3)}
+        for i in range(CELL_COUNT)
+    ]
+    pack_v = sum(c["voltage"] for c in cells)
+    return {
         "timestamp": int(time.time() * 1000),
-        "packs": [
-            {
-                "index": 1,
-                "temperature": bms_data["temperature"],
-                "balancerConnected": bms_data["balancerConnected"],
-                "current": bms_data["current"],
-                "power": power,
-                "cells": bms_data["cells"],
-            }
-        ],
+        "packs": [{
+            "index": 1,
+            "temperature": round(temp, 1),
+            "balancerConnected": True,
+            "current": round(current, 2),
+            "power": round(pack_v * current, 2),
+            "cells": cells,
+        }],
     }
 
-    return payload
+
+def on_connect(client, userdata, flags, rc, *args):
+    print("[MQTT] Connected" if rc == 0 else f"[MQTT] Connect failed rc={rc}")
 
 
-# =========================================================
-# MQTT CLIENT
-# =========================================================
+# paho-mqtt 2.x butuh callback_api_version; 1.x tidak punya atribut ini
+try:
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id=f"bms-sim-{DEVICE_ID}")
+except AttributeError:
+    client = mqtt.Client(client_id=f"bms-sim-{DEVICE_ID}")
 
-client = mqtt.Client(client_id=f"bms-python-{DEVICE_ID}")
 client.username_pw_set(USERNAME, PASSWORD)
 client.on_connect = on_connect
-client.on_disconnect = on_disconnect
-client.on_publish = on_publish
+client.reconnect_delay_set(min_delay=1, max_delay=30)
 
-print(f"[MQTT] Connecting to {BROKER}:{PORT}")
-
-try:
-    client.connect(BROKER, PORT, keepalive=60)
-except Exception as e:
-    print(f"[MQTT] Connection error: {e}")
-    exit(1)
-
+print(f"[MQTT] Connecting to {BROKER}:{PORT} as {USERNAME} -> {TOPIC}")
+client.connect(BROKER, PORT, keepalive=60)
 client.loop_start()
-time.sleep(1)
 
 try:
     while True:
-        payload = create_payload()
-        message = json.dumps(payload)
-
-        print()
-        print("========================================")
-        print("DUMMY BMS DATA")
-        print("========================================")
-        print(json.dumps(payload, indent=4))
-        print("========================================")
-        print("MQTT PUBLISH")
-        print("========================================")
-        print(f"Topic   : {TOPIC}")
-        print(f"Payload : {message}")
-        print("========================================")
-
-        if not client.is_connected():
-            print("[MQTT] Not connected")
-            try:
-                print("[MQTT] Trying reconnect...")
-                client.reconnect()
-            except Exception as e:
-                print(f"[MQTT] Reconnect failed: {e}")
-                time.sleep(PUBLISH_INTERVAL)
-                continue
-
-        result = client.publish(TOPIC, message, qos=1)
-
-        if result.rc == mqtt.MQTT_ERR_SUCCESS:
-            print("[MQTT] Publish success")
-            try:
-                result.wait_for_publish(timeout=5)
-            except Exception:
-                pass
-        else:
-            print(f"[MQTT] Publish failed, rc={result.rc}")
-
-        print(f"[SYSTEM] Next data in {PUBLISH_INTERVAL} seconds...")
-        time.sleep(PUBLISH_INTERVAL)
-
+        payload = step()
+        p = payload["packs"][0]
+        vs = [c["voltage"] for c in p["cells"]]
+        info = client.publish(TOPIC, json.dumps(payload), qos=1)
+        print(f"[{time.strftime('%H:%M:%S')}] rc={info.rc} I={p['current']:+.2f}A "
+              f"Vavg={sum(vs)/len(vs):.3f} Δ={(max(vs)-min(vs))*1000:.0f}mV T={p['temperature']}°C")
+        time.sleep(INTERVAL)
 except KeyboardInterrupt:
-    print()
-    print("[SYSTEM] Stopping...")
-
+    print("\n[SYSTEM] Stopping...")
 finally:
     client.loop_stop()
     client.disconnect()
-    print("[MQTT] Disconnected")
-    print("[SYSTEM] Done")

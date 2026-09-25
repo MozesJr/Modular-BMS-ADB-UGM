@@ -5,6 +5,7 @@ services:
       context: .
       args:
         BACKEND_URL: http://backend:4000
+        NEXT_PUBLIC_WS_URL: wss://gamabms.tech/ws
     image: bms-frontend:local
     container_name: bms-frontend
     ports:
