@@ -19,6 +19,8 @@ services:
     networks:
       - bms-network
     restart: unless-stopped
+    ports:
+      - "1883:1883"
     stop_grace_period: 10s
     # HEALTHCHECK didefinisikan di Dockerfile (nc -z 127.0.0.1 1883).
 

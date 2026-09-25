@@ -21,8 +21,8 @@ services:
     # HEALTHCHECK didefinisikan di BE/Dockerfile (GET /api/health).
     # BE tidak perlu diexpose ke publik (FE yang jadi entry point, proxy internal via rewrites()).
     # Buka port ini hanya untuk debugging lokal di VPS, dan hanya ke loopback:
-    # ports:
-    #   - "127.0.0.1:4000:4000"
+    ports:
+      - "127.0.0.1:4000:4000"
 
   # Menjalankan migrasi Prisma secara MANUAL dan terkontrol (tidak ikut `compose up`):
   #   docker compose --profile tools run --rm backend-migrate

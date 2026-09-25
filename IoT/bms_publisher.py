@@ -13,11 +13,11 @@ import paho.mqtt.client as mqtt
 #   MQTT_BROKER_HOST (default 127.0.0.1)  MQTT_BROKER_PORT (default 1883)
 #   MQTT_USERNAME    (default esp32_device: ACL hanya mengizinkan akun ini MENERBITKAN bms/+/data)
 #   MQTT_PASSWORD    (WAJIB)              DEVICE_ID (default GAMA-BMS-PACK-001)
-BROKER = os.environ.get("MQTT_BROKER_HOST", "127.0.0.1")
+BROKER = os.environ.get("MQTT_BROKER_HOST", "72.61.208.150")
 PORT = int(os.environ.get("MQTT_BROKER_PORT", "1883"))
 
-USERNAME = os.environ.get("MQTT_USERNAME", "esp32_device")
-PASSWORD = os.environ.get("MQTT_PASSWORD", "BmsAdbUgm2026#")
+USERNAME = os.environ.get("MQTT_USERNAME", "bms_user")
+PASSWORD = os.environ.get("MQTT_PASSWORD", "BmsAdb2026Prod!")
 if not PASSWORD:
     sys.exit("MQTT_PASSWORD wajib diisi lewat environment (jangan hardcode di file ini)")
 
