@@ -17,7 +17,7 @@ BROKER = os.environ.get("MQTT_BROKER_HOST", "127.0.0.1")
 PORT = int(os.environ.get("MQTT_BROKER_PORT", "1883"))
 
 USERNAME = os.environ.get("MQTT_USERNAME", "esp32_device")
-PASSWORD = os.environ.get("MQTT_PASSWORD")
+PASSWORD = os.environ.get("MQTT_PASSWORD", "BmsAdbUgm2026#")
 if not PASSWORD:
     sys.exit("MQTT_PASSWORD wajib diisi lewat environment (jangan hardcode di file ini)")
 

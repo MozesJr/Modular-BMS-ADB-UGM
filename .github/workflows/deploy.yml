@@ -3,7 +3,7 @@ name: Deploy to VPS
 on:
   push:
     branches:
-      - main # ganti sesuai branch production kamu
+      - main
 
 jobs:
   deploy:
@@ -17,8 +17,10 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
           script: |
+            set -e
             cd /home/Modular-BMS-ADB-UGM
             git pull origin main
-            docker compose down
-            docker compose up -d --build
+            docker compose build
+            docker compose --profile tools run --rm backend-migrate
+            docker compose up -d
             docker image prune -f
