@@ -33,6 +33,10 @@ export interface WsConnIdentity {
   tokenVersion: number;
   // Batas hidup koneksi (exp JWT dan/atau expiresAt akun); null = tanpa batas dari kredensial.
   expiresAtMs: number | null;
+  // Hanya koneksi cookie web: batas idle sesi (epoch ms) dan id sesi (klaim `sid`). Koneksi ditutup di
+  // min(expiresAtMs, idleDeadlineMs); extendSessionIdle() memajukan idleDeadlineMs bila user beraktivitas.
+  idleDeadlineMs?: number | null;
+  sessionId?: string | null;
 }
 
 interface Conn extends WsConnIdentity {
@@ -145,6 +149,19 @@ export class WsHub {
     this.scheduleExpiry(conn);
   }
 
+  // Memajukan batas idle koneksi cookie milik SESI tertentu (user + sid). Tidak menyentuh koneksi sesi/perangkat lain
+  // dan tidak pernah menghidupkan koneksi yang sudah ditutup. Mengembalikan jumlah koneksi yang diperpanjang.
+  extendSessionIdle(userId: string, sessionId: string, idleDeadlineMs: number): number {
+    let n = 0;
+    for (const conn of this.connsByUser.get(userId) ?? []) {
+      if (conn.sessionId !== sessionId || conn.idleDeadlineMs == null || idleDeadlineMs <= conn.idleDeadlineMs) continue;
+      conn.idleDeadlineMs = idleDeadlineMs;
+      this.scheduleExpiry(conn);
+      n += 1;
+    }
+    return n;
+  }
+
   private allConns(): Conn[] {
     return [...this.connsByUser.values()].flatMap((s) => [...s]);
   }
@@ -171,8 +188,9 @@ export class WsHub {
   private scheduleExpiry(conn: Conn) {
     if (conn.expiryTimer) clearTimeout(conn.expiryTimer);
     conn.expiryTimer = null;
-    if (conn.expiresAtMs === null) return;
-    const wait = conn.expiresAtMs - this.now();
+    const limits = [conn.expiresAtMs, conn.idleDeadlineMs ?? null].filter((v): v is number => v !== null);
+    if (limits.length === 0) return;
+    const wait = Math.min(...limits) - this.now();
     if (wait <= 0) {
       this.closeConn(conn, WS_CLOSE_UNAUTHENTICATED, "session expired");
       return;
@@ -380,6 +398,11 @@ export function getHub(): WsHub | null {
 // Helper untuk route handler. No-op bila hub belum ada (mis. tes unit) — tidak pernah melempar.
 export function invalidateDevice(deviceId: string): void {
   getHub()?.invalidateDevice(deviceId);
+}
+
+// Dipanggil callback jwt Auth.js saat user beraktivitas (update eksplisit). No-op tanpa hub; tidak pernah melempar.
+export function extendSessionIdle(userId: string, sessionId: string, idleDeadlineMs: number): void {
+  getHub()?.extendSessionIdle(userId, sessionId, idleDeadlineMs);
 }
 
 export function revalidateUser(userId: string): void {

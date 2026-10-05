@@ -16,6 +16,8 @@ declare module "next-auth" {
       expiresAt: string | null;
       tokenVersion: number;
     } & DefaultSession["user"];
+    // Batas idle sesi web; remainingSec dihitung server saat respons (klien memakainya, bukan jam server).
+    idle?: { timeoutSec: number; warningSec: number; remainingSec: number };
   }
 }
 
@@ -26,6 +28,10 @@ declare module "next-auth/jwt" {
     expiresAt: string | null;
     // versi token user saat login; undefined pada JWT lama -> dianggap 0
     tv?: number;
+    // idle deadline (epoch detik) dihitung server; hilang = sesi lama -> dianggap idle. Lihat lib/session-idle.ts.
+    ida?: number;
+    // id sesi acak per login: dipakai hub WS untuk memperpanjang deadline koneksi milik SESI yang sama saja.
+    sid?: string;
   }
 }
 

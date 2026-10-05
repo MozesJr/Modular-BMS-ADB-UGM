@@ -1,6 +1,7 @@
 "use client";
 
 import { useSidebar } from "@/context/SidebarContext";
+import IdleSessionProvider from "@/context/IdleSessionProvider";
 import { WsProvider } from "@/context/WsContext";
 import AppHeader from "@/layout/AppHeader";
 import AppSidebar from "@/layout/AppSidebar";
@@ -22,6 +23,7 @@ export default function AdminLayout({
     : "lg:ml-[90px]";
 
   return (
+    <IdleSessionProvider>
     <WsProvider>
       <div className="min-h-screen xl:flex">
         {/* Sidebar and Backdrop */}
@@ -38,5 +40,6 @@ export default function AdminLayout({
         </div>
       </div>
     </WsProvider>
+    </IdleSessionProvider>
   );
 }

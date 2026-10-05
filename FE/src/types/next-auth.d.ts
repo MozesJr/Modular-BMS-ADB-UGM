@@ -10,6 +10,8 @@ declare module "next-auth" {
       role: "USER" | "ADMIN";
       expiresAt: string | null;
     } & DefaultSession["user"];
+    // Batas idle dari server; remainingSec dihitung server saat respons.
+    idle?: { timeoutSec: number; warningSec: number; remainingSec: number };
   }
 }
 
@@ -18,5 +20,7 @@ declare module "next-auth/jwt" {
     id: string;
     role: "USER" | "ADMIN";
     expiresAt: string | null;
+    // idle deadline (epoch detik) dihitung SERVER; satu-satunya sumber untuk proxy.ts. Hilang = sesi lama (ditolak).
+    ida?: number;
   }
 }

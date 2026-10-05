@@ -35,6 +35,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
 
   if (!res.ok) {
+    // 401 dari /api/backend/*: sesi tidak sah (mis. idle di server) -> logout bersama, dijaga satu kali. Hanya di sini
+    // (bukan /api/auth/*), dan hanya di browser.
+    if (res.status === 401 && typeof window !== "undefined") {
+      void import("@/lib/sessionLogout").then((m) => m.logoutFromServerSignal());
+    }
     const data = await res.json().catch(() => null);
     throw new ApiError(
       res.status,

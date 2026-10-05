@@ -1,6 +1,7 @@
 import type { IncomingHttpHeaders } from "node:http";
 import { checkSessionAgainstUser, type DbUserForSession } from "@/lib/session-check";
 import { log } from "@/lib/logger";
+import { isIdleExpired } from "@/lib/session-idle";
 import type { WsConnIdentity } from "@/lib/ws-hub";
 
 // Autentikasi handshake /ws dari header mentah (IncomingMessage). Murni: verifikasi kredensial dan akses DB
@@ -13,6 +14,9 @@ export interface VerifiedClaims {
   userId: string;
   tokenVersion: number;
   expSec: number | null;
+  // Cookie web: idle deadline (epoch detik) dari klaim `ida`; null = klaim hilang (sesi lama). Bearer: undefined.
+  idleDeadlineSec?: number | null;
+  sessionId?: string | null;
 }
 
 export interface WsAuthDeps {
@@ -93,6 +97,11 @@ export async function authenticateUpgrade(headers: IncomingHttpHeaders, deps: Ws
     if (!claims) return { ok: false, status: 401, reason: "invalid_credentials" };
     if (claims.expSec !== null && claims.expSec * 1000 <= now) return { ok: false, status: 401, reason: "credentials_expired" };
 
+    // Cookie web: batas idle (klaim hilang = sesi lama = ditolak, sama seperti di callback jwt Auth.js).
+    if (kind === "cookie" && isIdleExpired(claims.idleDeadlineSec, Math.floor(now / 1000))) {
+      return { ok: false, status: 401, reason: "session_idle" };
+    }
+
     const user = await deps.loadUser(claims.userId);
     const check = checkSessionAgainstUser({ id: claims.userId, tokenVersion: claims.tokenVersion }, user, now);
     if (!check.ok || !user) return { ok: false, status: 401, reason: check.ok ? "user_missing" : check.reason };
@@ -107,6 +116,9 @@ export async function authenticateUpgrade(headers: IncomingHttpHeaders, deps: Ws
         userId: user.id,
         tokenVersion: claims.tokenVersion,
         expiresAtMs: limits.length > 0 ? Math.min(...limits) : null,
+        // Cookie web: koneksi ditutup (4401) tepat di batas idle; diperpanjang hub bila user aktif (extendSessionIdle).
+        idleDeadlineMs: kind === "cookie" && typeof claims.idleDeadlineSec === "number" ? claims.idleDeadlineSec * 1000 : null,
+        sessionId: kind === "cookie" ? (claims.sessionId ?? null) : null,
       },
     };
   } catch (err) {

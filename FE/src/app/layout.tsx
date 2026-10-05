@@ -18,7 +18,8 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${outfit.className} dark:bg-gray-900`}>
-        <SessionProvider>
+        {/* Tanpa refetch saat fokus: GET /api/auth/session menulis ulang cookie (race dengan touch idle). Sinkron sesi dilakukan IdleSessionProvider. */}
+        <SessionProvider refetchOnWindowFocus={false}>
           <ThemeProvider>
             <SidebarProvider>{children}</SidebarProvider>
           </ThemeProvider>

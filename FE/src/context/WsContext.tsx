@@ -1,6 +1,6 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { signOut } from "next-auth/react";
+import { logoutFromServerSignal } from "@/lib/sessionLogout";
 import type { BmsUpdatePayload } from "@/types/device";
 import { createWsController, type SessionProbe, type SocketLike, type WsStatus } from "@/context/wsController";
 
@@ -37,17 +37,6 @@ async function probeSession(): Promise<SessionProbe> {
   } catch {
     return "unreachable";
   }
-}
-
-// Sesi tidak lagi valid di server: bersihkan cookie lokal dulu (kalau tidak, proxy FE masih menganggap login dan
-// /signin memantul balik ke "/" -> loop), lalu arahkan ke /signin.
-async function redirectToSignIn() {
-  try {
-    await signOut({ redirect: false });
-  } catch {
-    // tetap lanjut ke /signin
-  }
-  window.location.assign("/signin?reason=expired");
 }
 
 type WsContextValue = {
@@ -95,7 +84,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
           console.error("[ws] failed parsing message", err);
         }
       },
-      onUnauthenticated: () => void redirectToSignIn(),
+      onUnauthenticated: () => void logoutFromServerSignal(),
       setTimer: (fn, ms) => setTimeout(fn, ms),
       clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
       now: () => Date.now(),

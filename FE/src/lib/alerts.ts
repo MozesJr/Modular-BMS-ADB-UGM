@@ -55,3 +55,29 @@ export function alertConfirm(options: {
     reverseButtons: true,
   }).then((result) => result.isConfirmed);
 }
+// Peringatan idle: hitung mundur sampai logout otomatis. result: "stay" (Tetap login), "logout" (Keluar), "closed"
+// (ditutup program, mis. karena ada aktivitas di tab lain). Esc/klik luar dinonaktifkan agar tidak tertutup tanpa sengaja.
+export function showIdleWarning(secondsLeft: () => number): { close: () => void; result: Promise<"stay" | "logout" | "closed"> } {
+  let ticker: ReturnType<typeof setInterval> | null = null;
+  const result = Swal.fire({
+    ...baseConfig,
+    icon: "warning",
+    title: "Sesi akan berakhir",
+    html: `Tidak ada aktivitas. Anda akan keluar otomatis dalam <b id="idle-countdown">${secondsLeft()}</b> detik.`,
+    showCancelButton: true,
+    confirmButtonText: "Tetap login",
+    cancelButtonText: "Keluar",
+    allowOutsideClick: false,
+    allowEscapeKey: false,
+    didOpen: () => {
+      ticker = setInterval(() => {
+        const el = document.getElementById("idle-countdown");
+        if (el) el.textContent = String(secondsLeft());
+      }, 250);
+    },
+    willClose: () => {
+      if (ticker) clearInterval(ticker);
+    },
+  }).then((r) => (r.isConfirmed ? "stay" : r.dismiss === Swal.DismissReason.cancel ? "logout" : "closed"));
+  return { close: () => Swal.close(), result };
+}

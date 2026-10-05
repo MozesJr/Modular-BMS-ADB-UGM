@@ -2,25 +2,29 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
+import { buildSignInUrl, type SignInReason } from "@/lib/callbackUrl";
+import { evaluateSession, isLoggedIn } from "@/lib/sessionState";
 
 const AUTH_PAGES = ["/signin", "/signup", "/forgot-password", "/reset-password"];
 
 export async function proxy(req: NextRequest) {
-  const { pathname } = req.nextUrl;
+  const { pathname, search } = req.nextUrl;
 
   const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-  const isExpired =
-    token?.expiresAt != null && new Date(token.expiresAt as string) < new Date();
-  const isLoggedIn = !!token && !isExpired;
+  // SATU keputusan untuk semua cabang: sesi idle/expired/lama dianggap BELUM login (termasuk saat membuka halaman auth),
+  // sehingga /signin tidak memantul ke "/" selama cookie idle masih tersimpan di browser. Deadline idle dihitung server
+  // (klaim `ida`); FE tidak punya konfigurasi idle sendiri.
+  const state = evaluateSession(token, Date.now());
+  const loggedIn = isLoggedIn(state);
   const isAuthPage = AUTH_PAGES.some((p) => pathname.startsWith(p));
 
-  if (!isLoggedIn && !isAuthPage) {
-    const url = new URL("/signin", req.url);
-    if (isExpired) url.searchParams.set("reason", "expired");
-    return NextResponse.redirect(url);
+  if (!loggedIn && !isAuthPage) {
+    const reason: SignInReason | undefined =
+      state.status === "expired" ? "expired" : state.status === "idle" ? (state.legacy ? "expired" : "idle") : undefined;
+    return NextResponse.redirect(new URL(buildSignInUrl({ reason, from: `${pathname}${search}` }), req.url));
   }
 
-  if (isLoggedIn && isAuthPage) {
+  if (loggedIn && isAuthPage) {
     return NextResponse.redirect(new URL("/", req.url));
   }
 

@@ -64,6 +64,9 @@ export interface SessionClaims {
   userId: string;
   tokenVersion: number;
   expSec: number | null;
+  // Hanya untuk cookie web: idle deadline (epoch detik) + id sesi. null = klaim tidak ada (sesi lama) -> ditolak. Bearer: tidak diisi.
+  idleDeadlineSec?: number | null;
+  sessionId?: string | null;
 }
 
 // Klaim dari access token (+ exp) untuk handshake WS.
@@ -85,7 +88,13 @@ export async function verifyCookieClaims(value: string, salt: string): Promise<S
     return null; // cookie rusak / bukan milik kita / kedaluwarsa
   }
   if (!token || typeof token.id !== "string") return null;
-  return { userId: token.id, tokenVersion: token.tv ?? 0, expSec: typeof token.exp === "number" ? token.exp : null };
+  return {
+    userId: token.id,
+    tokenVersion: token.tv ?? 0,
+    expSec: typeof token.exp === "number" ? token.exp : null,
+    idleDeadlineSec: typeof token.ida === "number" ? token.ida : null,
+    sessionId: typeof token.sid === "string" ? token.sid : null,
+  };
 }
 
 export function loadSessionUser(userId: string) {
