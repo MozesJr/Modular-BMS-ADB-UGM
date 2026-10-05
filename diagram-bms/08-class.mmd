@@ -1,0 +1,53 @@
+classDiagram
+  direction LR
+  class Server["server.ts"] {
+    +HTTP + WS upgrade /ws
+    +start MQTT client
+  }
+  class MqttClient["mqtt/client.ts"] {
+    +subscribe bms/+/data
+  }
+  class MqttSchema["mqtt/schema.ts"] {
+    +parseBmsMessage()
+  }
+  class Ingest["mqtt/ingest.ts"] {
+    +enqueueIngest()
+    +persistSnapshot()
+  }
+  class ProvisionLimit["mqtt/provision-limit.ts"]
+  class Ws["lib/ws.ts"] {
+    +broadcast()
+  }
+  class Auth["lib/auth.ts"]
+  class Authz["lib/authz.ts"] {
+    +getPrincipal()
+    +requireAdmin()
+    +assertCanView()
+    +assertOwner()
+  }
+  class DeviceAccess["lib/device-access.ts"] {
+    +requireDeviceAccess()
+  }
+  class Tokens["lib/tokens.ts"]
+  class TokenSessions["lib/token-sessions.ts"]
+  class Retention["lib/retention.ts"]
+  class Email["lib/email.ts"]
+  class RateLimit["lib/rate-limit.ts"]
+  class Prisma["PrismaClient"]
+
+  Server --> MqttClient
+  Server --> Ws
+  MqttClient --> MqttSchema : validasi
+  MqttClient --> Ingest
+  Ingest --> ProvisionLimit
+  Ingest --> Prisma
+  Ingest --> Ws : broadcast
+  Authz --> Auth
+  Authz --> TokenSessions
+  Authz --> Prisma
+  DeviceAccess --> Prisma
+  TokenSessions --> Tokens
+  TokenSessions --> Prisma
+  Retention --> Prisma
+  Email ..> Nodemailer
+  class Nodemailer

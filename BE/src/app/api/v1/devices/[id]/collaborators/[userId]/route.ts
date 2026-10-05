@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/authz";
 import { err, parseJson, route } from "@/lib/http";
 import { requireDeviceAccess } from "@/lib/device-access";
 import { toCollaboratorDto } from "@/lib/device-dto";
+import { invalidateDevice } from "@/lib/ws-hub";
 import { UpdateCollaboratorRequestSchema } from "@/contracts/schemas";
 
 type Ctx = { params: Promise<{ id: string; userId: string }> };
@@ -34,5 +35,6 @@ export const DELETE = route<Ctx>(async (_req, { params }) => {
 
   const result = await prisma.deviceCollaborator.deleteMany({ where: { deviceId: id, userId } });
   if (result.count === 0) throw err.notFound("Collaborator tidak ditemukan", "COLLABORATOR_NOT_FOUND");
+  invalidateDevice(id);
   return new Response(null, { status: 204 });
 });

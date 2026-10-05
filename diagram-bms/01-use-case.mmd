@@ -1,0 +1,63 @@
+flowchart LR
+  classDef actor fill:#ffffff,stroke:#1f2937,stroke-width:2px,color:#1f2937,font-weight:bold
+  classDef uc fill:#eff6ff,stroke:#2563eb,color:#1f2937
+  classDef auth fill:#f0fdf4,stroke:#16a34a,color:#1f2937
+  classDef adm fill:#f5f3ff,stroke:#7c3aed,color:#1f2937
+  classDef inc fill:#fffbeb,stroke:#f59e0b,color:#1f2937
+  classDef planned fill:#f9fafb,stroke:#9ca3af,stroke-dasharray:6 4,color:#6b7280
+
+  Guest["Guest"]:::actor
+  User["User<br/><small>owner · editor · viewer</small>"]:::actor
+  Admin["Admin"]:::actor
+
+  subgraph SYS["Sistem Modular Universal BMS"]
+    direction TB
+    subgraph A["Autentikasi"]
+      direction TB
+      U1(["Registrasi"]):::auth
+      U2(["Login"]):::auth
+      U3(["Lupa password"]):::auth
+      U4(["Reset password"]):::auth
+    end
+    subgraph M["Monitoring & Device"]
+      direction TB
+      U5(["Lihat Fleet Dashboard"]):::uc
+      U6(["Klaim / tambah device"]):::uc
+      U7(["Monitoring realtime device"]):::uc
+      U8(["Lihat riwayat"]):::uc
+      U9(["Lihat alarm<br/><small>dihitung di browser</small>"]):::uc
+      U10(["Kelola kolaborator<br/><small>owner</small>"]):::uc
+      U11(["Keluar dari kolaborasi"]):::uc
+      U12(["Edit profil (planned)"]):::planned
+    end
+    subgraph AD["Administrasi"]
+      direction TB
+      U13(["Verifikasi device"]):::adm
+      U14(["Tolak / hapus device"]):::adm
+      U15(["Kelola user"]):::adm
+    end
+    subgraph IO["Telemetri"]
+      direction TB
+      U16(["Kirim data telemetri"]):::uc
+      U17(["Push notifikasi alarm (planned)"]):::planned
+    end
+    INC1(["Cek hak akses device"]):::inc
+    INC2(["Kirim email reset"]):::inc
+  end
+
+  Pi["Raspberry Pi"]:::actor
+  Mail["Gmail SMTP"]:::actor
+  Mobile["Aplikasi Mobile<br/>(planned)"]:::planned
+
+  Guest --- U1 & U2 & U3 & U4
+  User --- U5 & U6 & U7 & U8 & U9 & U10 & U11 & U12
+  Admin --- U13 & U14 & U15
+  Admin -. "generalisasi: juga User" .-> User
+
+  U3 -. "«include»" .-> INC2
+  U7 & U8 & U10 -. "«include»" .-> INC1
+
+  U16 --- Pi
+  INC2 --- Mail
+  U17 -.- Mobile
+  U7 -.- Mobile

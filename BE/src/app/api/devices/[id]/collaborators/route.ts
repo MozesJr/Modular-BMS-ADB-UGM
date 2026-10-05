@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { assertCanView, assertOwner, requireAuth } from "@/lib/authz";
 import { err, parseJson, parseQuery, route } from "@/lib/http";
 import { collaboratorRoleSchema, emailSchema } from "@/contracts/common";
+import { invalidateDevice } from "@/lib/ws-hub";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -45,6 +46,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
       data: { deviceId: id, userId: targetUser.id, role: role ?? "viewer" },
       include: { user: { select: userSelect } },
     });
+    invalidateDevice(id);
     return NextResponse.json(collaborator, { status: 201 });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
@@ -64,5 +66,6 @@ export const DELETE = route<Ctx>(async (req, { params }) => {
 
   const { userId } = parseQuery(req, removeQuery);
   await prisma.deviceCollaborator.deleteMany({ where: { deviceId: id, userId } });
+  invalidateDevice(id);
   return NextResponse.json({ message: "Collaborator dihapus" });
 });

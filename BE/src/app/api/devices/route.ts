@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/authz";
+import { deviceAccessWhere } from "@/lib/device-access";
+import { invalidateDevice } from "@/lib/ws-hub";
 import { err, parseJson, route } from "@/lib/http";
 import { deviceNameSchema, serialNumberSchema } from "@/contracts/common";
 
@@ -10,12 +12,7 @@ export const GET = route(async () => {
   const session = await requireAuth();
 
   const devices = await prisma.device.findMany({
-    where: {
-      OR: [
-        { ownerId: session.user.id },
-        { collaborators: { some: { userId: session.user.id } } },
-      ],
-    },
+    where: deviceAccessWhere(session.user.id),
     include: {
       packs: {
         orderBy: { index: "asc" },
@@ -53,6 +50,7 @@ export const POST = route(async (req) => {
     });
     if (claim.count === 0) throw err.conflict("Device ID sudah terdaftar", "DEVICE_ALREADY_CLAIMED");
 
+    invalidateDevice(existing.id); // anggota device berubah (ownerId terisi) -> segarkan indeks WS
     const claimed = await prisma.device.findUniqueOrThrow({ where: { id: existing.id } });
     return NextResponse.json(claimed, { status: 200 });
   }

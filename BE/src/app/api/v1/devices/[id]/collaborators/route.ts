@@ -6,6 +6,7 @@ import { err, parseJson, route } from "@/lib/http";
 import { requireDeviceAccess } from "@/lib/device-access";
 import { enforceRateLimit, POLICIES } from "@/lib/rate-limit";
 import { toCollaboratorDto } from "@/lib/device-dto";
+import { invalidateDevice } from "@/lib/ws-hub";
 import { AddCollaboratorRequestSchema } from "@/contracts/schemas";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -35,6 +36,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
 
   try {
     const row = await prisma.deviceCollaborator.create({ data: { deviceId: id, userId: target.id, role }, select: SELECT });
+    invalidateDevice(id);
     return NextResponse.json(toCollaboratorDto(row, true), { status: 201 });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
