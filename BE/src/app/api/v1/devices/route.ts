@@ -6,6 +6,8 @@ import { NextResponse } from "next/server";
 import { err, parseJson, parseQuery, route } from "@/lib/http";
 import { enforceRateLimit, POLICIES } from "@/lib/rate-limit";
 import { loadDeviceDetail } from "@/lib/device-queries";
+import { deviceAccessWhere } from "@/lib/device-membership";
+import { invalidateDevice } from "@/lib/ws-hub";
 import { roleOf } from "@/lib/device-role";
 import { decodeCursor, encodeCursor } from "@/lib/cursor";
 import { jsonWithEtag } from "@/lib/etag";

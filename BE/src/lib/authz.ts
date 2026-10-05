@@ -1,11 +1,10 @@
 import { headers } from "next/headers";
-import type { Role } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ApiError, err } from "@/lib/http";
 import { roleOf } from "@/lib/device-role";
-import { checkSessionAgainstUser } from "@/lib/session-check";
-import { AccessSecretError, verifyAccessToken } from "@/lib/tokens";
+import { principalFromAccessToken, principalFromSessionClaims, type AuthSession } from "@/lib/session-principal";
+import { AccessSecretError } from "@/lib/tokens";
 import { log } from "@/lib/logger";
 import type { DeviceRole } from "@/lib/device-role";
 
@@ -15,44 +14,12 @@ import type { DeviceRole } from "@/lib/device-role";
 //   - akun belum expired (expiresAt) -> berlaku SEKETIKA, bukan hanya saat login
 //   - tokenVersion sama dengan yang di token (password diganti/direset -> semua sesi lama mati)
 //   - role diambil dari DB, bukan dari JWT (admin yang diturunkan langsung kehilangan akses)
-export type AuthSession = {
-  user: {
-    id: string;
-    role: Role;
-    expiresAt: string | null;
-    tokenVersion: number;
-    name?: string | null;
-    email?: string | null;
-  };
-};
-
-const USER_SELECT = { id: true, role: true, expiresAt: true, tokenVersion: true, name: true, email: true } as const;
-
-function toAuthSession(user: {
-  id: string;
-  role: Role;
-  expiresAt: Date | null;
-  tokenVersion: number;
-  name: string | null;
-  email: string;
-}): AuthSession {
-  return {
-    user: {
-      id: user.id,
-      role: user.role,
-      expiresAt: user.expiresAt ? user.expiresAt.toISOString() : null,
-      tokenVersion: user.tokenVersion,
-      name: user.name,
-      email: user.email,
-    },
-  };
-}
+export type { AuthSession };
 
 // Principal dari access token (Authorization: Bearer). Klien mobile memakai ini; web tetap cookie Auth.js.
 async function principalFromBearer(token: string): Promise<AuthSession | null> {
-  let claims;
   try {
-    claims = await verifyAccessToken(token);
+    return await principalFromAccessToken(token);
   } catch (e) {
     if (e instanceof AccessSecretError) {
       log.error("auth.access_secret_misconfigured", { reason: e.message });
@@ -60,22 +27,13 @@ async function principalFromBearer(token: string): Promise<AuthSession | null> {
     }
     throw e;
   }
-  if (!claims) return null;
-  const user = await prisma.user.findUnique({ where: { id: claims.userId }, select: USER_SELECT });
-  if (!checkSessionAgainstUser({ id: claims.userId, tokenVersion: claims.tokenVersion }, user).ok || !user) return null;
-  return toAuthSession(user);
 }
 
 async function principalFromCookie(): Promise<AuthSession | null> {
   const session = await auth();
   const sessionUser = session?.user;
   if (!sessionUser || typeof sessionUser.id !== "string") return null;
-
-  const user = await prisma.user.findUnique({ where: { id: sessionUser.id }, select: USER_SELECT });
-  if (!checkSessionAgainstUser({ id: sessionUser.id, tokenVersion: sessionUser.tokenVersion }, user).ok || !user) {
-    return null;
-  }
-  return toAuthSession(user);
+  return principalFromSessionClaims(sessionUser.id, sessionUser.tokenVersion);
 }
 
 // getPrincipal: Bearer access token ATAU cookie Auth.js. Bila header Authorization ADA tetapi tidak valid -> tidak

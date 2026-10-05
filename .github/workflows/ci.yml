@@ -55,6 +55,8 @@ jobs:
       - name: docs/mqtt-payload.schema.json harus sinkron
         run: npm run mqtt:schema && git diff --exit-code -- ../docs/mqtt-payload.schema.json
       - run: npm run build
+      - name: Smoke /ws terhadap server HASIL KOMPILASI (proses terpisah; menangkap crash impor Next di custom server)
+        run: npx tsx scripts/smoke-ws-compiled.ts
 
   frontend:
     runs-on: ubuntu-latest

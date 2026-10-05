@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/authz";
+<<<<<<< HEAD
+=======
+import { deviceAccessWhere } from "@/lib/device-membership";
+import { invalidateDevice } from "@/lib/ws-hub";
+>>>>>>> feat/ws-auth
 import { err, parseJson, route } from "@/lib/http";
 import { deviceNameSchema, serialNumberSchema } from "@/contracts/common";
 
