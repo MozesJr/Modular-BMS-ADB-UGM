@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/authz";
-import { deviceAccessWhere } from "@/lib/device-access";
+import { deviceAccessWhere } from "@/lib/device-membership";
 import { invalidateDevice } from "@/lib/ws-hub";
 import { err, parseJson, route } from "@/lib/http";
 import { deviceNameSchema, serialNumberSchema } from "@/contracts/common";

@@ -1,12 +1,10 @@
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
-import { decodeJwt } from "jose";
-import { decode } from "next-auth/jwt";
 import type { WebSocketServer } from "ws";
 import { prisma } from "@/lib/prisma";
-import { loadDeviceViewerIds } from "@/lib/device-access";
+import { loadDeviceViewerIds } from "@/lib/device-membership";
 import { wsAllowedOrigins } from "@/lib/env-check";
-import { verifyAccessToken } from "@/lib/tokens";
+import { loadSessionUser, verifyBearerClaims, verifyCookieClaims } from "@/lib/session-principal";
 import type { WsAuthDeps } from "@/lib/ws-auth";
 import { createUpgradeHandler } from "@/lib/ws-upgrade";
 import { setHub, WsHub } from "@/lib/ws-hub";
@@ -22,27 +20,9 @@ const intEnv = (name: string, fallback: number) => {
 function realAuthDeps(): WsAuthDeps {
   return {
     allowedOrigins: new Set(wsAllowedOrigins()),
-    async verifyBearer(token) {
-      const claims = await verifyAccessToken(token); // null bila tidak valid; throw AccessSecretError bila salah konfigurasi
-      if (!claims) return null;
-      const exp = decodeJwt(token).exp;
-      return { userId: claims.userId, tokenVersion: claims.tokenVersion, expSec: typeof exp === "number" ? exp : null };
-    },
-    async verifyCookie(value, salt) {
-      // Secret yang SAMA dengan lib/auth.ts (NextAuth({ secret: process.env.NEXTAUTH_SECRET })).
-      const secret = process.env.NEXTAUTH_SECRET;
-      if (!secret) throw new Error("NEXTAUTH_SECRET belum diset");
-      let token;
-      try {
-        token = await decode({ token: value, secret, salt });
-      } catch {
-        return null; // cookie rusak/bukan milik kita/kedaluwarsa
-      }
-      if (!token || typeof token.id !== "string") return null;
-      return { userId: token.id, tokenVersion: token.tv ?? 0, expSec: typeof token.exp === "number" ? token.exp : null };
-    },
-    loadUser: (userId) =>
-      prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true, expiresAt: true, tokenVersion: true } }),
+    verifyBearer: verifyBearerClaims, // null bila tidak valid; throw AccessSecretError bila salah konfigurasi (-> 503)
+    verifyCookie: verifyCookieClaims,
+    loadUser: loadSessionUser,
   };
 }
 
