@@ -3,7 +3,6 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { revalidateUser } from "@/lib/ws-hub";
 import { ApiError, parseJson, route } from "@/lib/http";
 import { getClientIp } from "@/lib/client-ip";
 import { enforceRateLimit, POLICIES } from "@/lib/rate-limit";
@@ -38,6 +37,5 @@ export const POST = route(async (req) => {
     prisma.passwordResetToken.deleteMany({ where: { userId: resetToken.userId, usedAt: null } }),
   ]);
 
-  revalidateUser(resetToken.userId); // tokenVersion naik -> koneksi WS lama ditutup (4401)
   return NextResponse.json({ message: "Password berhasil direset" });
 });

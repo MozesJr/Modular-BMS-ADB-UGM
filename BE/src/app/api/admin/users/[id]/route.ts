@@ -5,7 +5,6 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/authz";
 import { err, parseJson, route } from "@/lib/http";
 import { expiresAtSchema, nameSchema, newPasswordSchema, roleSchema } from "@/contracts/common";
-import { revalidateUser } from "@/lib/ws-hub";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -57,7 +56,6 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
     data,
     select: { id: true, name: true, email: true, role: true, expiresAt: true },
   });
-  revalidateUser(id); // expiresAt/password berubah -> koneksi WS user ini dicek ulang sekarang juga
 
   return NextResponse.json(user);
 });
@@ -75,6 +73,5 @@ export const DELETE = route<Ctx>(async (_req, { params }) => {
   }
 
   await prisma.user.delete({ where: { id } });
-  revalidateUser(id); // user hilang -> koneksi WS-nya ditutup (4401)
   return NextResponse.json({ message: "User dihapus" });
 });

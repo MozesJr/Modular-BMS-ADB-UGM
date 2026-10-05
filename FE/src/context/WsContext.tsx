@@ -1,19 +1,10 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { signOut } from "next-auth/react";
 import type { BmsUpdatePayload } from "@/types/device";
-import { createWsController, type SessionProbe, type SocketLike, type WsStatus } from "@/context/wsController";
 
 // SATU koneksi WS untuk seluruh app (dulu tiap komponen buka sendiri). Menyediakan status
 // koneksi global (untuk indikator header) + subscribe ke event "bms:update".
-//
-// Autentikasi: cookie sesi Auth.js ikut otomatis pada handshake (same-site), tanpa token di URL. Server menolak
-// handshake tanpa sesi valid (401) / Origin tidak terdaftar (403) / terlalu banyak koneksi (429) SEBELUM handshake,
-// dan menutup koneksi dengan kode 4401 bila sesi berakhir. Browser tidak bisa membaca status HTTP dari upgrade yang
-// gagal (hanya close 1006), jadi penyebabnya dibedakan dengan probe ke endpoint yang sudah ada (lihat probeSession).
-//   "rejected" = server dapat dijangkau & sesi valid, tetapi WS ditolak berulang -> BERHENTI mencoba, tampilkan
-//                "realtime terputus" (ada tombol coba lagi). Putus jaringan biasa tetap reconnect dengan backoff.
-export type { WsStatus };
+export type WsStatus = "connecting" | "connected" | "disconnected";
 type Listener = (payload: BmsUpdatePayload) => void;
 
 function normalizeWsUrl(raw: string): string {
@@ -27,48 +18,15 @@ function normalizeWsUrl(raw: string): string {
 }
 
 const WS_URL = normalizeWsUrl(process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4000/ws");
-// GET /api/v1/me (sudah ada; lewat rewrite FE -> BE) membedakan login dari tidak login: 200 vs 401.
-// /api/auth/session TIDAK dipakai karena membalas 200 walau tanpa sesi.
-async function probeSession(): Promise<SessionProbe> {
-  try {
-    const res = await fetch("/api/v1/me", { credentials: "same-origin", cache: "no-store" });
-    if (res.status === 401) return "unauthenticated";
-    return res.ok ? "authenticated" : "unreachable";
-  } catch {
-    return "unreachable";
-  }
-}
+const BASE_RECONNECT_MS = 1000;
+const MAX_RECONNECT_MS = 30_000;
 
-// Sesi tidak lagi valid di server: bersihkan cookie lokal dulu (kalau tidak, proxy FE masih menganggap login dan
-// /signin memantul balik ke "/" -> loop), lalu arahkan ke /signin.
-async function redirectToSignIn() {
-  try {
-    await signOut({ redirect: false });
-  } catch {
-    // tetap lanjut ke /signin
-  }
-  window.location.assign("/signin?reason=expired");
-}
-
-type WsContextValue = {
-  status: WsStatus;
-  subscribe: (l: Listener) => () => void;
-  // Tutup socket secara eksplisit dan jangan sambung lagi (dipanggil saat logout).
-  disconnect: () => void;
-  // Mulai lagi setelah status "rejected".
-  retry: () => void;
-};
-const WsContext = createContext<WsContextValue>({
-  status: "connecting",
-  subscribe: () => () => {},
-  disconnect: () => {},
-  retry: () => {},
-});
+type WsContextValue = { status: WsStatus; subscribe: (l: Listener) => () => void };
+const WsContext = createContext<WsContextValue>({ status: "connecting", subscribe: () => () => {} });
 
 export function WsProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<WsStatus>("connecting");
   const listeners = useRef(new Set<Listener>());
-  const controls = useRef<{ disconnect: () => void; retry: () => void }>({ disconnect: () => {}, retry: () => {} });
 
   const subscribe = useCallback((l: Listener) => {
     listeners.current.add(l);
@@ -76,17 +34,25 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
       listeners.current.delete(l);
     };
   }, []);
-  const disconnect = useCallback(() => controls.current.disconnect(), []);
-  const retry = useCallback(() => controls.current.retry(), []);
 
   useEffect(() => {
-    const controller = createWsController({
-      createSocket: () => new WebSocket(WS_URL) as unknown as SocketLike,
-      probe: probeSession,
-      onStatus: setStatus,
-      onMessage: (data) => {
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+    let attempt = 0;
+
+    function connect() {
+      if (cancelled) return;
+      setStatus((s) => (attempt === 0 ? "connecting" : "connecting"));
+      ws = new WebSocket(WS_URL);
+
+      ws.onopen = () => {
+        attempt = 0;
+        setStatus("connected");
+      };
+      ws.onmessage = (ev) => {
         try {
-          const msg = JSON.parse(data) as { event: string; payload: unknown };
+          const msg = JSON.parse(ev.data) as { event: string; payload: unknown };
           if (msg.event === "bms:update") {
             const payload = msg.payload as BmsUpdatePayload;
             listeners.current.forEach((l) => l(payload));
@@ -94,36 +60,32 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
         } catch (err) {
           console.error("[ws] failed parsing message", err);
         }
-      },
-      onUnauthenticated: () => void redirectToSignIn(),
-      setTimer: (fn, ms) => setTimeout(fn, ms),
-      clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
-      now: () => Date.now(),
-      random: Math.random,
-    });
-
-    controls.current = {
-      disconnect: () => {
-        controller.stop("client signing out");
+      };
+      ws.onclose = () => {
+        if (cancelled) return;
         setStatus("disconnected");
-      },
-      retry: controller.retry,
-    };
+        const delay = Math.min(BASE_RECONNECT_MS * 2 ** attempt, MAX_RECONNECT_MS);
+        const jitter = Math.random() * 0.3 * delay;
+        attempt += 1;
+        setStatus("connecting");
+        reconnectTimer = setTimeout(connect, delay + jitter);
+      };
+      ws.onerror = () => ws?.close();
+    }
 
-    controller.start();
-    return () => controller.stop();
+    connect();
+    return () => {
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
+    };
   }, []);
 
-  return <WsContext.Provider value={{ status, subscribe, disconnect, retry }}>{children}</WsContext.Provider>;
+  return <WsContext.Provider value={{ status, subscribe }}>{children}</WsContext.Provider>;
 }
 
 export function useWsStatus(): WsStatus {
   return useContext(WsContext).status;
-}
-
-export function useWsControls(): { disconnect: () => void; retry: () => void } {
-  const { disconnect, retry } = useContext(WsContext);
-  return { disconnect, retry };
 }
 
 // Kompat: subscribe ke bms:update via koneksi bersama.

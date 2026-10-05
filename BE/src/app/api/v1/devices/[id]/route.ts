@@ -5,7 +5,6 @@ import { err, parseJson, parseQuery, route } from "@/lib/http";
 import { requireDeviceAccess } from "@/lib/device-access";
 import { loadDeviceDetail } from "@/lib/device-queries";
 import { jsonWithEtag } from "@/lib/etag";
-import { invalidateDevice } from "@/lib/ws-hub";
 import { DeleteDeviceQuerySchema, UpdateDeviceRequestSchema } from "@/contracts/schemas";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -51,6 +50,5 @@ export const DELETE = route<Ctx>(async (req, { params }) => {
       prisma.device.update({ where: { id }, data: { ownerId: null, name: null, verified: false } }),
     ]);
   }
-  invalidateDevice(id); // device dihapus / dilepas: owner dan collaborator berhenti menerima update
   return new Response(null, { status: 204 });
 });
