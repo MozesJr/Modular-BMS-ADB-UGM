@@ -48,7 +48,10 @@ function fakeAuth(db: FakeDb, over: Partial<WsAuthDeps> = {}): WsAuthDeps {
   return {
     allowedOrigins: new Set([ORIGIN]),
     verifyBearer: async (t) => (t.startsWith("bearer-") ? { userId: t.slice(7), tokenVersion: 0, expSec: null } : null),
-    verifyCookie: async (v) => (v.startsWith("cookie-") ? { userId: v.slice(7), tokenVersion: 0, expSec: null } : null),
+    verifyCookie: async (v) =>
+      v.startsWith("cookie-")
+        ? { userId: v.slice(7), tokenVersion: 0, expSec: null, idleDeadlineSec: Math.floor(Date.now() / 1000) + 3600, sessionId: `sid-${v.slice(7)}` }
+        : null,
     loadUser: async (id) => db.users.get(id) ?? null,
     ...over,
   };
@@ -342,7 +345,7 @@ describe("masa hidup koneksi", () => {
     const short = await setup({
       auth: () => ({
         verifyBearer: async () => ({ userId: "A", tokenVersion: 0, expSec: soon }),
-        verifyCookie: async () => ({ userId: "A", tokenVersion: 0, expSec: soon }),
+        verifyCookie: async () => ({ userId: "A", tokenVersion: 0, expSec: soon, idleDeadlineSec: soon + 3600, sessionId: "s" }),
       }),
     });
     short.db.addUser("A");
@@ -353,7 +356,7 @@ describe("masa hidup koneksi", () => {
   });
   it("exp yang sudah lewat saat handshake -> 401", async () => {
     const past = Math.floor(Date.now() / 1000) - 10;
-    const old = await setup({ auth: () => ({ verifyCookie: async () => ({ userId: "A", tokenVersion: 0, expSec: past }) }) });
+    const old = await setup({ auth: () => ({ verifyCookie: async () => ({ userId: "A", tokenVersion: 0, expSec: past, idleDeadlineSec: past + 7200, sessionId: "s" }) }) });
     old.db.addUser("A");
     expect(await old.connect(cookieFor("A"))).toEqual({ status: 401 });
     await old.stop();
@@ -369,5 +372,55 @@ describe("masa hidup koneksi", () => {
       },
     );
     await expect(hub.revalidateAll()).resolves.toBeUndefined();
+  });
+});
+
+describe("batas idle sesi web", () => {
+  const nowSec = () => Math.floor(Date.now() / 1000);
+  const withCookie = (claims: { idleDeadlineSec?: number | null; sessionId?: string | null }) =>
+    setup({ auth: () => ({ verifyCookie: async () => ({ userId: "A", tokenVersion: 0, expSec: null, sessionId: "s1", ...claims }) }) });
+
+  it("cookie idle (deadline lewat) ditolak 401 saat handshake", async () => {
+    const x = await withCookie({ idleDeadlineSec: nowSec() - 1 });
+    x.db.addUser("A");
+    expect(await x.connect(cookieFor("A"))).toEqual({ status: 401 });
+    await x.stop();
+  });
+  it("cookie tanpa klaim idle (sesi lama) ditolak 401; bearer tidak terpengaruh", async () => {
+    const x = await withCookie({ idleDeadlineSec: null });
+    x.db.addUser("A");
+    expect(await x.connect(cookieFor("A"))).toEqual({ status: 401 });
+    asConn(await x.connect(bearerFor("A")));
+    await x.stop();
+  });
+  it("koneksi cookie ditutup 4401 tepat di batas idle", async () => {
+    const x = await withCookie({ idleDeadlineSec: nowSec() + 1 });
+    x.db.addUser("A");
+    const c = asConn(await x.connect(cookieFor("A")));
+    expect(await closeCode(c)).toBe(4401);
+    await x.stop();
+  });
+  it("extendSessionIdle memperpanjang SESI yang sama saja; sesi/perangkat lain tetap ditutup", async () => {
+    const x = await setup({
+      auth: () => ({
+        verifyCookie: async (v) => ({
+          userId: "A",
+          tokenVersion: 0,
+          expSec: null,
+          idleDeadlineSec: nowSec() + 1,
+          sessionId: v.slice(7), // cookie-<sid>
+        }),
+      }),
+    });
+    x.db.addUser("A");
+    const active = asConn(await x.connect(cookieFor("S1")));
+    const other = asConn(await x.connect(cookieFor("S2")));
+    expect(x.hub.extendSessionIdle("A", "S1", Date.now() + 60_000)).toBe(1);
+    expect(await closeCode(other)).toBe(4401);
+    expect(active.ws.readyState).toBe(WebSocket.OPEN);
+    // tidak memundurkan dan tidak menyentuh sesi yang tidak dikenal
+    expect(x.hub.extendSessionIdle("A", "S1", Date.now() + 1000)).toBe(0);
+    expect(x.hub.extendSessionIdle("A", "NOPE", Date.now() + 60_000)).toBe(0);
+    await x.stop();
   });
 });

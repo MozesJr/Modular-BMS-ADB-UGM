@@ -17,7 +17,7 @@ import { existsSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
-import { encode } from "next-auth/jwt";
+import { decode, encode } from "next-auth/jwt";
 import WebSocket from "ws";
 import { signAccessToken } from "../src/lib/tokens";
 import { createUser, makeClient, Reporter, requireTestDb, seedDevice, serverEnv, SMOKE_ACCESS_SECRET, SMOKE_NEXTAUTH_SECRET } from "./_smoke-lib";
@@ -128,6 +128,8 @@ async function main() {
       WS_ALLOWED_ORIGINS: ORIGIN,
       WS_REVALIDATE_SEC: String(REVALIDATE_SEC),
       WS_PING_SEC: "1",
+      SESSION_IDLE_MINUTES: "1",
+      SESSION_IDLE_WARNING_SECONDS: "20",
     }),
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -154,7 +156,11 @@ async function main() {
     await Promise.race([subscribedP, sleep(15_000)]);
 
     const cookieName = "authjs.session-token"; // NEXTAUTH_URL http -> tanpa prefix __Secure-
-    const cookieOf = async (id: string) => `${cookieName}=${await encode({ token: { id, tv: 0 }, secret: SMOKE_NEXTAUTH_SECRET, salt: cookieName, maxAge: 3600 })}`;
+    const nowSec = () => Math.floor(Date.now() / 1000);
+    // ida = idle deadline (epoch detik) yang dihitung server; sid = id sesi. Cookie sah harus membawa keduanya.
+    const mint = async (id: string, extra: Record<string, unknown>) =>
+      `${cookieName}=${await encode({ token: { id, tv: 0, role: "USER", expiresAt: null, ...extra }, secret: SMOKE_NEXTAUTH_SECRET, salt: cookieName, maxAge: 3600 })}`;
+    const cookieOf = (id: string) => mint(id, { ida: nowSec() + 3600, sid: `sid-${id}` });
     const cookieA = await cookieOf(userA.id);
     const cookieB = await cookieOf(userB.id);
     process.env.JWT_ACCESS_SECRET = SMOKE_ACCESS_SECRET; // secret yang sama dengan server yang di-spawn
@@ -165,6 +171,54 @@ async function main() {
     r.ok("GET /api/v1/me dengan cookie -> 200 (route Next + principal tanpa impor Next)", (await call("GET", "/api/v1/me", { headers: { cookie: cookieA } })).status === 200);
     r.ok("GET /api/v1/me dengan bearer -> 200", (await call("GET", "/api/v1/me", { token: bearerA })).status === 200);
     r.ok("GET /api/v1/me tanpa kredensial -> 401", (await call("GET", "/api/v1/me")).status === 401);
+
+    // 1b) Batas idle ditegakkan SERVER: cookie lama tidak diterima lagi walau dikirim ulang manual
+    const idleCookie = await mint(userA.id, { ida: nowSec() - 5, sid: "old" });
+    const legacyCookie = await mint(userA.id, {}); // tanpa klaim ida (JWT lama): ditolak, tanpa grandfather
+    r.ok("cookie idle -> REST 401", (await call("GET", "/api/v1/me", { headers: { cookie: idleCookie } })).status === 401);
+    r.ok("cookie tanpa klaim ida (lama) -> REST 401", (await call("GET", "/api/v1/me", { headers: { cookie: legacyCookie } })).status === 401);
+    const idleWs = await connect({ cookie: idleCookie, origin: ORIGIN });
+    r.ok("cookie idle -> WS 401", "status" in idleWs && idleWs.status === 401);
+    const legacyWs = await connect({ cookie: legacyCookie, origin: ORIGIN });
+    r.ok("cookie lama tanpa ida -> WS 401", "status" in legacyWs && legacyWs.status === 401);
+
+    // 1c) Request otomatis TIDAK memperpanjang: GET /api/auth/session membawa ida apa adanya (dan melaporkan sisa)
+    const ida0 = nowSec() + 30;
+    const autoCookie = await mint(userA.id, { ida: ida0, sid: "auto" });
+    const read = await fetch(`${BASE}/api/auth/session`, { headers: { cookie: autoCookie } });
+    const body = (await read.json()) as { idle?: { remainingSec: number; timeoutSec: number } } | null;
+    r.ok("GET /api/auth/session memuat idle.remainingSec dan timeoutSec dari server", !!body?.idle && body.idle.timeoutSec === 60 && body.idle.remainingSec <= 30, JSON.stringify(body?.idle));
+    const reSigned = read.headers.getSetCookie().find((c) => c.startsWith(`${cookieName}=`));
+    const reSignedValue = reSigned?.split(";")[0].slice(cookieName.length + 1);
+    const reSignedToken = reSignedValue ? await decode({ token: reSignedValue, secret: SMOKE_NEXTAUTH_SECRET, salt: cookieName }) : null;
+    r.ok("pembacaan otomatis tidak memajukan ida (cookie di-sign ulang dengan ida yang sama)", reSignedToken?.ida === ida0, `ida=${reSignedToken?.ida} awal=${ida0}`);
+
+    // 1d) update eksplisit (POST /api/auth/session) memajukan ida ke now + SESSION_IDLE_MINUTES dan memperpanjang WS sesi itu
+    const csrfRes = await fetch(`${BASE}/api/auth/csrf`);
+    const { csrfToken } = (await csrfRes.json()) as { csrfToken: string };
+    const csrfCookie = csrfRes.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+    const shortIda = nowSec() + 4;
+    const liveCookie = await mint(userA.id, { ida: shortIda, sid: "live" });
+    const liveWs = await connect({ cookie: liveCookie, origin: ORIGIN });
+    const staleWs = await connect({ cookie: await mint(userA.id, { ida: shortIda, sid: "other" }), origin: ORIGIN });
+    r.ok("dua sesi cookie (sid berbeda) terhubung dengan deadline idle pendek", "ws" in liveWs && "ws" in staleWs);
+    const upd = await fetch(`${BASE}/api/auth/session`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: `${liveCookie}; ${csrfCookie}` },
+      body: JSON.stringify({ csrfToken, data: {} }),
+    });
+    const updBody = (await upd.json()) as { idle?: { remainingSec: number } } | null;
+    r.ok("update eksplisit -> remainingSec kembali ~60 dtk", upd.status === 200 && (updBody?.idle?.remainingSec ?? 0) >= 55, `status=${upd.status} ${JSON.stringify(updBody?.idle)}`);
+    const updated = upd.headers.getSetCookie().find((c) => c.startsWith(`${cookieName}=`))?.split(";")[0].slice(cookieName.length + 1);
+    const updatedToken = updated ? await decode({ token: updated, secret: SMOKE_NEXTAUTH_SECRET, salt: cookieName }) : null;
+    r.ok("cookie hasil update membawa ida baru yang lebih besar", typeof updatedToken?.ida === "number" && updatedToken.ida >= nowSec() + 55, `ida=${updatedToken?.ida}`);
+    if ("ws" in liveWs && "ws" in staleWs) {
+      const stale = new Promise<number>((res) => staleWs.ws.on("close", (c) => res(c)));
+      const staleCode = await Promise.race([stale, sleep(8000).then(() => -1)]);
+      r.ok("koneksi WS sesi lain (tidak di-update) ditutup 4401 di batas idle", staleCode === 4401, `code=${staleCode}`);
+      r.ok("koneksi WS sesi yang di-update tetap terbuka melewati batas idle lama", liveWs.ws.readyState === WebSocket.OPEN);
+      liveWs.ws.terminate();
+    }
 
     // 2) Handshake
     const none = await connect({});

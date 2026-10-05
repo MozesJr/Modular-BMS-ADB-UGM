@@ -8,7 +8,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import React, { useState } from "react";
 
-export default function SignInForm() {
+const REASON_MESSAGES = {
+  idle: "Sesi berakhir karena tidak ada aktivitas. Silakan masuk lagi.",
+  expired: "Sesi Anda telah berakhir. Silakan masuk lagi.",
+} as const;
+
+export default function SignInForm({ reason, callbackUrl }: { reason?: "idle" | "expired"; callbackUrl?: string }) {
   const router = useRouter();
 
   const [showPassword, setShowPassword] = useState(false);
@@ -44,7 +49,7 @@ export default function SignInForm() {
       return;
     }
 
-    router.push("/");
+    router.push(callbackUrl ?? "/");
     router.refresh();
   };
 
@@ -63,6 +68,11 @@ export default function SignInForm() {
           <div>
             <form onSubmit={handleSubmit}>
               <div className="space-y-6">
+                {reason && !error && (
+                  <div role="status" className="rounded-lg bg-warning-50 px-4 py-3 text-sm text-warning-700 dark:bg-warning-500/10 dark:text-warning-400">
+                    {REASON_MESSAGES[reason]}
+                  </div>
+                )}
                 {error && (
                   <div className="rounded-lg bg-error-50 px-4 py-3 text-sm text-error-600 dark:bg-error-500/10 dark:text-error-400">
                     {error}

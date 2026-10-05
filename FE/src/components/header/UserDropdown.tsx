@@ -5,6 +5,8 @@ import React, { useState } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useWsControls } from "@/context/WsContext";
+import { postIdleMessage } from "@/lib/idleChannel";
+import { beginManualLogout } from "@/lib/sessionLogout";
 import { Dropdown } from "../ui/dropdown/Dropdown";
 import { DropdownItem } from "../ui/dropdown/DropdownItem";
 
@@ -29,7 +31,9 @@ export default function UserDropdown() {
   async function handleSignOut() {
     // Server tidak mengetahui logout web (tokenVersion tidak berubah), jadi socket ditutup eksplisit dari sini.
     disconnectWs();
+    beginManualLogout(); // jalur otomatis (401/4401/idle) tidak boleh menimpa navigasi ini
     await signOut({ redirect: false });
+    postIdleMessage({ type: "logout", reason: "manual" }); // tab lain ikut keluar
     router.push("/signin");
     router.refresh();
   }

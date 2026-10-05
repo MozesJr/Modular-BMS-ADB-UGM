@@ -66,7 +66,22 @@ export function checkWsEnv(env: Env = process.env): string[] {
   return problems;
 }
 
+// --- Idle timeout sesi web ---
+export function checkSessionEnv(env: Env = process.env): string[] {
+  const problems: string[] = [];
+  for (const name of ["SESSION_IDLE_MINUTES", "SESSION_IDLE_WARNING_SECONDS"] as const) {
+    const v = env[name];
+    if (v !== undefined && v !== "" && !/^[1-9]\d*$/.test(v)) problems.push(`${name} harus bilangan bulat positif`);
+  }
+  const minutes = Number.parseInt(env.SESSION_IDLE_MINUTES || "30", 10);
+  const warning = Number.parseInt(env.SESSION_IDLE_WARNING_SECONDS || "60", 10);
+  if (Number.isFinite(minutes) && Number.isFinite(warning) && warning >= minutes * 60) {
+    problems.push("SESSION_IDLE_WARNING_SECONDS harus lebih kecil dari SESSION_IDLE_MINUTES x 60");
+  }
+  return problems;
+}
+
 // Mengembalikan daftar masalah konfigurasi (kosong = OK).
 export function checkRequiredEnv(env: Env = process.env): string[] {
-  return [checkAccessSecret(env), ...checkWsEnv(env)].filter((p): p is string => p !== null);
+  return [checkAccessSecret(env), ...checkWsEnv(env), ...checkSessionEnv(env)].filter((p): p is string => p !== null);
 }

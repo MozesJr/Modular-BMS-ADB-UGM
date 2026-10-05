@@ -59,6 +59,16 @@ POST /api/v1/auth/logout-all  (Bearer)                                 → 204 (
 ```
 `TokenResponse`: `accessToken`, `refreshToken`, `tokenType:"Bearer"`, `expiresIn` (detik, 900), `refreshExpiresIn` (detik, ≤ 2.592.000), `user`.
 
+### Auto logout idle (hanya sesi WEB; API v1 mobile tidak berubah)
+
+Sesi cookie web berakhir setelah `SESSION_IDLE_MINUTES` (default 30) tanpa **interaksi user**; klien mobile (access + refresh token) tidak terpengaruh.
+
+- Server menulis klaim `ida` (idle deadline, epoch detik) ke dalam JWT sesi. Klaim ini hanya dimajukan oleh `POST /api/auth/session` (update eksplisit) yang dikirim FE saat ada klik/ketikan/scroll/sentuhan/pindah halaman (di-throttle 60 detik). Request otomatis (polling REST, WebSocket, refetch di background, `GET /api/auth/session`) membawa `ida` apa adanya dan **tidak** memperpanjang sesi.
+- Ditegakkan di server: callback `jwt` Auth.js (semua REST yang memakai cookie), handshake `/ws` (401), koneksi `/ws` yang sudah terbuka (ditutup 4401 tepat di batas; diperpanjang selama user aktif), dan `proxy.ts` FE (membaca klaim yang sama; sesi idle diperlakukan sebagai belum login di semua cabang).
+- Cookie sesi lama tanpa klaim `ida` (terbit sebelum fitur ini) ditolak: semua user login ulang satu kali setelah deploy.
+- FE menampilkan dialog "Sesi akan berakhir" `SESSION_IDLE_WARNING_SECONDS` (default 60) sebelum batas, menyinkronkan tab lewat BroadcastChannel, lalu mengarahkan ke `/signin?reason=idle&callbackUrl=<halaman terakhir>`.
+- **Batas yang diterima:** JWT stateless (tanpa tabel sesi). Cookie lama yang disalin pihak lain tetap diterima sampai `ida`-nya sendiri lewat, walau pemilik aslinya masih aktif dengan cookie yang lebih baru; setelah itu ditolak. Mencabutnya lebih awal membutuhkan penyimpanan sesi di server.
+
 ### Penyimpanan token (wajib diikuti)
 | Token | Simpan di | Jangan |
 |---|---|---|
