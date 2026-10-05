@@ -1,0 +1,54 @@
+flowchart LR
+  classDef ent fill:#ffffff,stroke:#1f2937,stroke-width:2px,color:#1f2937,font-weight:bold
+  classDef proc fill:#eff6ff,stroke:#2563eb,stroke-width:2px,color:#1f2937
+  classDef store fill:#f0fdfa,stroke:#0d9488,stroke-width:2px,color:#1f2937
+  classDef planned fill:#f9fafb,stroke:#9ca3af,stroke-dasharray:6 4,color:#6b7280
+
+  Pi["Raspberry Pi"]:::ent
+  User["User"]:::ent
+  Admin["Admin"]:::ent
+  Mail["Gmail SMTP"]:::ent
+
+  P1(("1.0<br/>Autentikasi")):::proc
+  P2(("2.0<br/>Manajemen<br/>Device &<br/>Kolaborator")):::proc
+  P3(("3.0<br/>Ingest<br/>Telemetri")):::proc
+  P4(("4.0<br/>Monitoring<br/>Realtime")):::proc
+  P5(("5.0<br/>Query<br/>Riwayat")):::proc
+  P6(("6.0<br/>Administrasi")):::proc
+  P7(("7.0<br/>Alert Engine<br/>(planned)")):::planned
+  P8(("8.0<br/>Retensi &<br/>Rollup")):::proc
+
+  D1[["D1 · User & Token"]]:::store
+  D2[["D2 · Device & Kolaborator"]]:::store
+  D3[["D3 · Pack & Cell terkini"]]:::store
+  D4[["D4 · Pack/Cell History"]]:::store
+  D5[["D5 · Rollup 1 menit"]]:::store
+
+  User -- "login, register, reset" --> P1
+  P1 <-- "kredensial, token" --> D1
+  P1 -- "link reset" --> Mail
+
+  User -- "klaim device, undang kolaborator" --> P2
+  P2 <-- "CRUD device & role" --> D2
+
+  Pi -- "payload MQTT" --> P3
+  P3 -- "cek / auto-provision" --> D2
+  P3 -- "state terkini" --> D3
+  P3 -- "snapshot" --> D4
+  P3 -- "bms:update" --> P4
+  P4 -- "push WebSocket" --> User
+
+  User -- "rentang waktu" --> P5
+  D4 -- "data mentah" --> P5
+  D5 -- "data agregat" --> P5
+  P5 -- "grafik & alarm" --> User
+
+  Admin -- "verifikasi, kelola user" --> P6
+  P6 <--> D1
+  P6 <--> D2
+
+  D4 -- "data lama" --> P8
+  P8 -- "agregat 1 menit" --> D5
+
+  P3 -. "data baru" .-> P7
+  P7 -. "notifikasi" .-> User

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { ApiError } from "@/lib/http";
 import { log } from "@/lib/logger";
+import { revalidateUser } from "@/lib/ws-hub";
 import {
   accessTtlSec,
   generateRefreshToken,
@@ -165,4 +166,5 @@ export async function endAllSessions(userId: string, now: Date = new Date()): Pr
     prisma.user.update({ where: { id: userId }, data: { tokenVersion: { increment: 1 } } }),
     prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } }),
   ]);
+  revalidateUser(userId); // tokenVersion naik -> koneksi WS user ini ditutup (4401)
 }

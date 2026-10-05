@@ -184,9 +184,47 @@ GET /devices/abc  If-None-Match: W/"K3x…"  →  304 (tanpa body)   → pakai s
 * Aksi tulis (rename, undang, dll.) sebaiknya **tidak** diantrekan diam-diam saat offline tanpa memberi tahu pengguna; tidak ada `Idempotency-Key` di v1.
 * ETag dashboard tidak memasukkan `generatedAt`; ETag riwayat dihitung dari isi seri.
 
-## 7. Realtime (sementara: polling)
+## 7. Realtime (WebSocket `/ws` + polling cadangan)
 
-WebSocket dan push menyusul di Gelombang 2. Sementara, **hanya saat layar terlihat (foreground)**:
+`/ws` mengirim event `bms:update` (server → klien saja). Bentuk pesan tidak berubah: `{"event":"bms:update","payload":{id,serialNumber,timestamp,receivedAt,packs[...]},"ts":<ms>}`.
+**Hanya device yang boleh Anda lihat** yang dikirim: owner atau collaborator (aturan yang sama dengan `GET /devices`; ADMIN tidak otomatis menerima device orang lain). Klien tidak perlu mengirim pesan; pesan masuk diabaikan (batas 1 KiB).
+
+### Menyambung
+
+| Klien | Kredensial | Catatan |
+|---|---|---|
+| Web (browser) | Cookie sesi Auth.js, ikut otomatis | Header `Origin` **wajib** ada dan terdaftar di `WS_ALLOWED_ORIGINS` (browser mengirimnya sendiri). Tidak ada token di URL. |
+| Mobile | Header `Authorization: Bearer <accessToken>` pada handshake | `Origin` boleh tidak ada; bila ada harus terdaftar. **Jangan** menaruh token di query string (bocor ke log). |
+
+Contoh (Dart `web_socket_channel`/`dart:io`): `WebSocket.connect(url, headers: {'Authorization': 'Bearer $accessToken'})`.
+
+### Penolakan (terjadi SEBELUM handshake selesai, status HTTP)
+
+| Status | Arti | Tindakan klien |
+|---|---|---|
+| 401 | Tanpa kredensial / tidak valid / sesi berakhir | Mobile: refresh token lalu coba sekali lagi; gagal -> login ulang. Web: ke `/signin`. |
+| 403 | `Origin` tidak terdaftar atau cookie tanpa `Origin` | Konfigurasi, jangan di-retry terus. |
+| 429 | Lebih dari `WS_MAX_CONN_PER_USER` (default 5) koneksi terbuka | Tutup koneksi lain; jangan retry rapat. |
+| 503 | Server sedang berhenti / verifikasi sementara gagal | Retry dengan backoff + jitter. |
+
+Browser tidak dapat membaca status HTTP dari upgrade yang gagal (hanya melihat close 1006). FE web membedakannya dengan probe `GET /api/v1/me`: 401 -> `/signin`; server terjangkau tapi WS tetap ditolak 3x -> berhenti dan menampilkan "Realtime terputus" (tombol coba lagi); jaringan putus -> backoff tanpa batas.
+
+### Selama koneksi
+
+- Close code **4401** = sesi tidak lagi valid (access token habis, password diubah/direset, logout semua perangkat, akun expired/dihapus). **Jangan reconnect dengan kredensial yang sama**: mobile memanggil `/auth/refresh` lalu menyambung ulang dengan token baru; web menuju `/signin`.
+- Koneksi bearer ditutup 4401 saat access token kedaluwarsa (±15 menit). Tidak ada pesan refresh in-band: cukup reconnect dengan token baru.
+- Server mengirim ping tiap `WS_PING_SEC` (default 30 dtk); balas pong (otomatis di hampir semua library). Koneksi yang tidak membalas diputus.
+- Akses mengikuti perubahan keanggotaan: collaborator dihapus / device di-unclaim atau dihapus -> berhenti menerima update (maks. `WS_MEMBERSHIP_TTL_SEC`, praktisnya seketika).
+- Putus biasa (1001, 1006, jaringan): reconnect dengan backoff eksponensial + jitter, lalu **ambil ulang snapshot** (`GET /devices`), karena pesan selama putus tidak diputar ulang.
+
+### Batasan yang perlu diketahui
+
+- **Logout web tidak mengubah `tokenVersion`**, jadi server tidak tahu user logout dari satu tab. FE menutup socket di tab itu secara eksplisit. Tab/perangkat lain yang masih memegang cookie yang sama tetap tersambung sampai validasi ulang menemukan sesi tidak valid (password diubah, akun expired/dihapus, logout-all) atau JWT sesi habis. Hanya "logout semua perangkat" / reset password yang memutus mereka seketika.
+- Indeks akses ada di memori satu proses. Bila BE di-scale ke lebih dari satu instance, invalidasi perlu pub/sub (Postgres NOTIFY/Redis).
+
+### Cadangan: polling
+
+Bila WS tidak tersedia, **hanya saat layar terlihat (foreground)**:
 
 | Layar | Interval polling | Catatan |
 |---|---|---|
@@ -241,5 +279,6 @@ curl -s "https://<host>/api/v1/devices/<id>/history?bucket=5m&metrics=power" -H 
 - [ ] Jangan mencatat header `Authorization`, body login/refresh, atau token ke log/analytics/crash report.
 - [ ] Hapus semua token saat logout dan saat menerima kode sesi-berakhir (§1).
 - [ ] Refresh single-flight; jangan retry refresh yang responsnya tidak diketahui (§2).
+- [ ] WS: kredensial hanya di header `Authorization`, tidak di URL; tangani close 4401 (refresh lalu reconnect) dan jangan reconnect rapat saat 403/429 (§7).
 - [ ] Tampilkan `temperatureC: null` sebagai "sensor error", bukan 0 °C.
 - [ ] Jangan menampilkan SoC/SoH atau angka turunan yang tidak ada di API.

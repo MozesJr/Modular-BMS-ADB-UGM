@@ -1,26 +1,19 @@
-import type { WebSocketServer } from "ws";
+import { getHub, WS_CLOSE_UNAUTHENTICATED } from "@/lib/ws-hub";
 
-let wssInstance: WebSocketServer | null = null;
+export { WS_CLOSE_UNAUTHENTICATED };
 
-export function setWss(wss: WebSocketServer) {
-  wssInstance = wss;
-}
-
-export function broadcast(event: string, payload: unknown) {
-  if (!wssInstance) {
-    console.warn("[ws] broadcast called before setWss() — event dropped", event);
+// Fasad tipis untuk pemanggil lama (mqtt/ingest.ts). Signature dan bentuk pesan tidak berubah:
+// { event, payload, ts }. Pengiriman difilter per user oleh WsHub (lihat ws-hub.ts) dan TIDAK PERNAH melempar.
+export function broadcast(event: string, payload: unknown): void {
+  const hub = getHub();
+  if (!hub) {
+    console.warn("[ws] broadcast called before WS runtime initialised — event dropped", event);
     return;
   }
-  const message = JSON.stringify({ event, payload, ts: Date.now() });
-  wssInstance.clients.forEach((client) => {
-    if (client.readyState === client.OPEN) {
-      client.send(message);
-    }
-  });
+  hub.broadcast(event, payload);
 }
+
 // Dipakai saat shutdown: tutup semua koneksi dengan kode 1001 (going away) supaya klien reconnect ke instance baru.
 export function closeAllClients(reason = "server shutting down") {
-  if (!wssInstance) return;
-  wssInstance.clients.forEach((client) => client.close(1001, reason));
-  wssInstance.close();
+  getHub()?.closeAll(1001, reason);
 }

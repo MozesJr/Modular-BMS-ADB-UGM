@@ -22,9 +22,7 @@ export const GET = route(async (req) => {
   const { user } = await requireAuth();
   const { view, limit, cursor } = parseQuery(req, DevicesQuerySchema);
 
-  const access: Prisma.DeviceWhereInput = {
-    OR: [{ ownerId: user.id }, { collaborators: { some: { userId: user.id } } }],
-  };
+  const access: Prisma.DeviceWhereInput = deviceAccessWhere(user.id);
   let where: Prisma.DeviceWhereInput = access;
   if (cursor) {
     const { c, i } = decodeCursor(cursor, cursorSchema);
@@ -84,5 +82,6 @@ export const POST = route(async (req) => {
     const created = await prisma.device.create({ data: { serialNumber, name, ownerId: user.id, verified: false }, select: { id: true } });
     deviceId = created.id;
   }
+  invalidateDevice(deviceId);
   return NextResponse.json(await loadDeviceDetail(deviceId, "owner"), { status: 201 });
 });

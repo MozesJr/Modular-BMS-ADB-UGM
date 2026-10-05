@@ -207,7 +207,7 @@ export default function FleetPulse({
               </span>
             )}
             <span className="tabular-nums">
-              {wsStatus !== "connected" ? "WS terputus" : lastPacketAt != null ? `Packet terakhir ${formatAge(nowMs - lastPacketAt)}` : "Menunggu packet…"}
+              {wsStatus !== "connected" ? (wsStatus === "rejected" ? "Realtime terputus" : "WS terputus") : lastPacketAt != null ? `Packet terakhir ${formatAge(nowMs - lastPacketAt)}` : "Menunggu packet…"}
             </span>
           </span>
         </div>

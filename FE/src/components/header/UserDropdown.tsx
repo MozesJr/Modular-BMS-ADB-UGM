@@ -4,6 +4,7 @@ import Link from "next/link";
 import React, { useState } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { useWsControls } from "@/context/WsContext";
 import { Dropdown } from "../ui/dropdown/Dropdown";
 import { DropdownItem } from "../ui/dropdown/DropdownItem";
 
@@ -11,6 +12,7 @@ export default function UserDropdown() {
   const [isOpen, setIsOpen] = useState(false);
   const { data: session } = useSession();
   const router = useRouter();
+  const { disconnect: disconnectWs } = useWsControls();
 
   const displayName = session?.user?.name ?? "Pengguna";
   const displayEmail = session?.user?.email ?? "";
@@ -25,6 +27,8 @@ export default function UserDropdown() {
   }
 
   async function handleSignOut() {
+    // Server tidak mengetahui logout web (tokenVersion tidak berubah), jadi socket ditutup eksplisit dari sini.
+    disconnectWs();
     await signOut({ redirect: false });
     router.push("/signin");
     router.refresh();
