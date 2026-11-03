@@ -1,0 +1,14 @@
+[Unit]
+Description=GAMA BMS OLED Display Service
+After=multi-user.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/bms
+ExecStart=/usr/bin/python3 /home/bms/dummy_raspi.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
