@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block body %}
+<header>
+  <h1>{{ cfg.device_name }}</h1>
+  <form method="post" action="/logout">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="link">Keluar</button>
+  </form>
+</header>
+
+{% if state.last_error %}<div class="msg err">{{ state.last_error }}</div>{% endif %}
+{% if default_pw %}<div class="msg err">Password login masih bawaan. Ganti di bagian "Password login" di bawah.</div>{% endif %}
+
+<section>
+  <h2>Status</h2>
+  <dl>
+    <dt>ID alat</dt><dd>{{ S.DEVICE_ID }}</dd>
+    <dt>Mode</dt><dd>{% if state.mode == 'sta' %}Terhubung{% elif state.mode == 'ap' %}Setup (hotspot){% else %}Tidak terhubung{% endif %}</dd>
+    <dt>WiFi</dt><dd>{{ state.ssid or '-' }}</dd>
+    <dt>Alamat IP</dt><dd>{{ state.ip or '-' }}</dd>
+    <dt>MQTT</dt><dd>{% if cfg.mqtt.host %}{{ cfg.mqtt.host }}:{{ cfg.mqtt.port }}{% else %}belum diatur{% endif %}</dd>
+  </dl>
+</section>
+
+<section>
+  <h2>WiFi</h2>
+  <form method="post" action="/wifi">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="ssid">Nama WiFi (SSID)</label>
+    <input id="ssid" type="text" name="ssid" list="nets" maxlength="32" required autocomplete="off">
+    <datalist id="nets">
+      {% for n in nets %}<option value="{{ n.ssid }}">{{ n.signal }}%{% if not n.secure %} (terbuka){% endif %}</option>{% endfor %}
+    </datalist>
+    <p class="hint">Pilih dari daftar atau ketik manual. Hanya WiFi 2.4 GHz.
+      {% if state.mode != 'ap' %}<button type="button" class="link" id="rescan">Cari ulang</button>{% endif %}</p>
+    <label for="psk">Password WiFi</label>
+    <input id="psk" type="password" name="psk" maxlength="63" autocomplete="off">
+    <label class="check"><input type="checkbox" name="hidden"> WiFi tersembunyi</label>
+    <button>Simpan &amp; hubungkan</button>
+    <p class="hint">Kalau gagal konek, alat otomatis kembali ke WiFi sebelumnya.</p>
+  </form>
+</section>
+
+<section>
+  <h2>MQTT</h2>
+  <form method="post" action="/mqtt">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="host">Host broker</label>
+    <input id="host" type="text" name="host" value="{{ cfg.mqtt.host }}" required>
+    <label for="port">Port</label>
+    <input id="port" type="number" name="port" value="{{ cfg.mqtt.port }}" min="1" max="65535" required>
+    <label for="username">Username</label>
+    <input id="username" type="text" name="username" value="{{ cfg.mqtt.username }}" autocomplete="off">
+    <label for="mpass">Password</label>
+    <input id="mpass" type="password" name="password" autocomplete="new-password"
+           placeholder="{% if cfg.mqtt.password %}(tersimpan, kosongkan jika tidak diubah){% endif %}">
+    <label for="base_topic">Base topic</label>
+    <input id="base_topic" type="text" name="base_topic" value="{{ cfg.mqtt.base_topic }}">
+    <label class="check"><input type="checkbox" name="tls" {% if cfg.mqtt.tls %}checked{% endif %}> Pakai TLS</label>
+    {% if cfg.mqtt.password %}<label class="check"><input type="checkbox" name="clear_password"> Hapus password tersimpan</label>{% endif %}
+    <label class="check"><input type="checkbox" name="force"> Tetap simpan walau broker tidak bisa dihubungi</label>
+    <button>Simpan MQTT</button>
+  </form>
+</section>
+
+<section>
+  <h2>Perangkat</h2>
+  <form method="post" action="/device">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="device_name">Nama alat</label>
+    <input id="device_name" type="text" name="device_name" value="{{ cfg.device_name }}" maxlength="21">
+    <label for="interval_s">Interval kirim data (detik)</label>
+    <input id="interval_s" type="number" name="interval_s" value="{{ cfg.app.interval_s }}" min="1" max="86400">
+    <button>Simpan</button>
+  </form>
+</section>
+
+<section>
+  <h2>Password login</h2>
+  <form method="post" action="/password">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="old">Password lama</label>
+    <input id="old" type="password" name="old" required>
+    <label for="new">Password baru (min. 8 karakter)</label>
+    <input id="new" type="password" name="new" minlength="8" required autocomplete="new-password">
+    <label for="new2">Ulangi password baru</label>
+    <input id="new2" type="password" name="new2" minlength="8" required autocomplete="new-password">
+    <button>Ganti password</button>
+  </form>
+</section>
+
+<section>
+  <h2>Factory reset</h2>
+  <p>Menghapus WiFi, MQTT, password login, dan semua setelan lain, lalu alat menyala ulang
+     dalam mode setup. Tidak bisa dibatalkan.</p>
+  <form method="post" action="/reset">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="confirm">Ketik RESET untuk konfirmasi</label>
+    <input id="confirm" type="text" name="confirm" autocomplete="off" required>
+    <button class="danger">Reset ke setelan pabrik</button>
+  </form>
+  <p class="hint">Bisa juga lewat tombol fisik: tahan {{ S.HOLD_RESET_S }} detik.</p>
+</section>
+
+<script>
+var b = document.getElementById('rescan');
+if (b) b.onclick = function () {
+  b.textContent = 'Mencari...';
+  fetch('/scan').then(function (r) { return r.json(); }).then(function (list) {
+    var dl = document.getElementById('nets'); dl.innerHTML = '';
+    list.forEach(function (n) {
+      var o = document.createElement('option');
+      o.value = n.ssid; o.textContent = n.signal + '%' + (n.secure ? '' : ' (terbuka)');
+      dl.appendChild(o);
+    });
+    b.textContent = 'Cari ulang (' + list.length + ' ditemukan)';
+  }).catch(function () { b.textContent = 'Gagal, coba lagi'; });
+};
+</script>
+{% endblock %}

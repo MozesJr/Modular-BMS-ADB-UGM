@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block body %}
+<header><h1>{{ S.AP_SSID }}</h1></header>
+<section>
+{% if ssid %}
+  <h2>Mencoba konek ke "{{ ssid }}"</h2>
+  <p>Hotspot alat akan mati sebentar, jadi halaman ini akan terputus. Itu normal.</p>
+  <p><strong>Lihat layar alat:</strong></p>
+  <ul>
+    <li>Muncul nama WiFi dan alamat IP: berhasil. Halaman ini selanjutnya bisa dibuka
+        dari jaringan yang sama lewat alamat IP tersebut.</li>
+    <li>Muncul "WiFi GAGAL": alat kembali ke setelan sebelumnya. Kalau belum pernah
+        terhubung, hotspot <strong>{{ S.AP_SSID }}</strong> muncul lagi dalam kurang
+        lebih 1 menit. Sambungkan ulang dan coba lagi.</li>
+  </ul>
+{% else %}
+  <h2>Factory reset berjalan</h2>
+  <p>Semua setelan dihapus dan alat menyala ulang. Dalam 1-2 menit hotspot
+     <strong>{{ S.AP_SSID }}</strong> akan muncul untuk setup dari awal.</p>
+{% endif %}
+</section>
+{% endblock %}
