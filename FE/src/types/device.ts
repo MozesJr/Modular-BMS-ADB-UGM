@@ -14,6 +14,12 @@ export type Pack = {
   // null = device lama belum kirim field ini di payload MQTT.
   current: number | null; // Ampere — negatif = charging, positif = discharging
   power: number | null; // Watt, = voltage_pack x current
+  // Dari coulomb counter BMS (JK-BMS). null = perangkat tidak mengirim (ESP32 lama / simulator) -> JANGAN dianggap 0.
+  soc: number | null; // % 0–100
+  remainingCapacity: number | null; // Ah
+  capacity: number | null; // Ah, kapasitas setting BMS
+  // true = balancer sedang aktif balancing SAAT INI. Beda dari balancerConnected (hanya "terhubung"). null = tidak dikirim.
+  balancing: boolean | null;
   cells: Cell[];
   updatedAt: string;
 };
@@ -60,6 +66,7 @@ export type HistoryBucket = {
   tempAvg: number | null;
   currentAvg: number | null;
   powerAvg: number | null;
+  socAvg: number | null; // % dari BMS; null = tidak ada sampel (bukan 0). Bisa undefined bila BE belum diperbarui.
   energyWh: number | null; // net (signed)
   energyInWh: number | null; // charge (positif)
   energyOutWh: number | null; // discharge (positif)
@@ -120,6 +127,10 @@ export type BmsUpdatePayload = {
     // Opsional: device lama belum kirim field ini.
     current?: number;
     power?: number;
+    soc?: number; // % 0–100 dari BMS
+    remainingCapacity?: number; // Ah
+    capacity?: number; // Ah
+    balancing?: boolean;
     cells: { index: number; voltage: number }[];
   }[];
 };

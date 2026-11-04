@@ -1,0 +1,15 @@
+{
+  "device_name": "Alat",
+  "mqtt": {
+    "host": "",
+    "port": 1883,
+    "username": "",
+    "password": "",
+    "base_topic": "alat",
+    "tls": false
+  },
+  "app": {
+    "interval_s": 60
+  },
+  "admin_password_hash": ""
+}

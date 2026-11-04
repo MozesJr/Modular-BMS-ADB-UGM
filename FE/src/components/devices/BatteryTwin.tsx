@@ -17,10 +17,14 @@ type Props = {
   current: number | null;
   balancerConnected: boolean;
   socPercent: number | null;
+  // "bms" = angka dari coulomb counter (tanpa "~"); "estimate" = estimasi voltage (diberi "~").
+  socSource?: "bms" | "estimate" | null;
+  // true/false = status balancing aktual dari BMS; null/undefined = perangkat tidak melaporkan.
+  balancing?: boolean | null;
   freshness: Freshness;
 };
 
-export default function BatteryTwin({ cells, current, balancerConnected, socPercent, freshness }: Props) {
+export default function BatteryTwin({ cells, current, balancerConnected, socPercent, socSource = "estimate", balancing = null, freshness }: Props) {
   const uid = useId().replace(/:/g, "");
   const reduced = useReducedMotion();
   const [hovered, setHovered] = useState<number | null>(null);
@@ -32,7 +36,8 @@ export default function BatteryTwin({ cells, current, balancerConnected, socPerc
   const isLive = freshness === "live";
   const dir = currentDirection(current);
   const showFlow = isLive && dir !== "idle";
-  const showBalance = isLive && balancerConnected && stats.minIndex != null && stats.maxIndex != null && stats.minIndex !== stats.maxIndex;
+  // balancing === false (BMS bilang idle) -> jangan animasikan aliran balancing walau balancer terhubung.
+  const showBalance = isLive && balancerConnected && balancing !== false && stats.minIndex != null && stats.maxIndex != null && stats.minIndex !== stats.maxIndex;
 
   // Rank per voltage (1 = tertinggi).
   const rankByIndex = new Map<number, number>();
@@ -66,7 +71,7 @@ export default function BatteryTwin({ cells, current, balancerConnected, socPerc
         viewBox={`0 0 ${W} ${H}`}
         className="w-full h-auto"
         role="img"
-        aria-label={`Digital twin pack: SoC ${socPercent != null ? socPercent.toFixed(0) : "—"}%, ${n} cell, delta ${stats.deltaMv ?? "—"} mV`}
+        aria-label={`Digital twin pack: SoC ${socPercent != null ? (socSource === "bms" ? "" : "estimasi ") + socPercent.toFixed(0) : "—"}%, ${n} cell, delta ${stats.deltaMv ?? "—"} mV`}
         style={!isLive ? { filter: "grayscale(1)", opacity: 0.65 } : undefined}
       >
         <defs>
@@ -164,7 +169,7 @@ export default function BatteryTwin({ cells, current, balancerConnected, socPerc
 
         {/* SoC angka besar */}
         <text x={BODY_X + BODY_W / 2} y={BODY_Y + BODY_H + 18} textAnchor="middle" className="fill-gray-800 dark:fill-white" fontSize={13} fontWeight={700}>
-          {socPercent != null ? `SoC ~${socPercent.toFixed(0)}%` : "SoC —"}
+          {socPercent != null ? `SoC ${socSource === "bms" ? "" : "~"}${socPercent.toFixed(0)}%` : "SoC —"}
         </text>
       </svg>
 

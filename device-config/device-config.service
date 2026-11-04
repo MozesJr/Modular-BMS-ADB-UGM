@@ -1,0 +1,13 @@
+[Unit]
+Description=Device config portal (WiFi setup, MQTT, factory reset)
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+WorkingDirectory=/opt/device-config
+ExecStart=/usr/bin/python3 /opt/device-config/main.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

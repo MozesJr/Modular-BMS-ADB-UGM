@@ -54,6 +54,7 @@ d("riwayat + rollup + retensi (DB nyata sekali-pakai)", () => {
             balancerConnected: true,
             current: packIndex === 0 ? -1 - (k % 3) : null,
             power: packIndex * 100 + k,
+            soc: packIndex === 0 && k % 11 !== 0 ? 40 + (k % 30) : null, // pack1 tanpa soc sama sekali; pack0 sesekali null
           });
         }
         for (const cellIndex of [0, 1, 2]) {
@@ -91,6 +92,19 @@ d("riwayat + rollup + retensi (DB nyata sekali-pakai)", () => {
     // pack1 k=0..13, null pada k=0,7 -> nilai (20+k%10) untuk k selain 0 dan 7
     const expected = [...Array(14).keys()].filter((k) => k % 7 !== 0).map((k) => 20 + (k % 10));
     expect(t1.points[0].v).toBeCloseTo(expected.reduce((a, b) => a + b, 0) / expected.length, 3);
+  });
+
+  it("soc: pack tanpa soc tidak punya seri; soc null tidak menjadi titik 0 dan tidak merusak rata-rata", async () => {
+    const from = at(winRecent, 0).toISOString();
+    const { series } = await run({ from, to: at(winRecent, 13).toISOString(), bucket: "1h", metrics: "soc" });
+    expect(series.some((s) => s.packIndex === 1)).toBe(false);
+    const s0 = series.find((s) => s.packIndex === 0 && s.metric === "soc")!;
+    expect(s0.unit).toBe("%");
+    const expected = [...Array(14).keys()].filter((k) => k % 11 !== 0).map((k) => 40 + (k % 30));
+    expect(s0.points[0].v).toBeCloseTo(expected.reduce((a, b) => a + b, 0) / expected.length, 3);
+    expect(s0.points[0].min).toBe(Math.min(...expected));
+    const raw = await run({ bucket: "raw", from, to: at(winRecent, 13).toISOString(), metrics: "soc", limit: 100 });
+    expect(raw.series[0].points.every((pt) => pt.v > 0)).toBe(true);
   });
 
   it("cell voltage 1m: per (pack, cell), satuan V", async () => {
@@ -158,7 +172,7 @@ d("riwayat + rollup + retensi (DB nyata sekali-pakai)", () => {
       { from: at(winStraddle, -60).toISOString(), to: at(winStraddle, 130).toISOString(), bucket: "1h" },
       { from: new Date(NOW.getTime() - 41 * DAY).toISOString(), to: NOW.toISOString(), bucket: "1h", packIndex: 0 },
     ];
-    const metricsSets = ["temperature,current,power", "voltage"];
+    const metricsSets = ["temperature,current,power,soc", "voltage"];
     const snapshot = async () => {
       const out: unknown[] = [];
       for (const rg of ranges) for (const m of metricsSets) out.push((await run({ ...rg, metrics: m })).series);

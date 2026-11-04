@@ -202,12 +202,12 @@ export interface paths {
         };
         /**
          * Riwayat telemetri (time-series)
-         * @description Seri per pack (`temperature` °C, `current` A, `power` W) atau per cell (`voltage` V). Default: 24 jam terakhir, bucket 5m, metrics temperature,current,power.
+         * @description Seri per pack (`temperature` °C, `current` A, `power` W, `soc` % — SoC BMS, opsional) atau per cell (`voltage` V). Default: 24 jam terakhir, bucket 5m, metrics temperature,current,power.
          *
          *     - `bucket=raw`: sampel asli; rentang maks 48 jam; `voltage` tidak boleh digabung dengan metrik pack; halaman berikutnya lewat `nextCursor` → `?cursor=`.
          *     - `bucket=1m|5m|1h`: agregat (v = rata-rata, min, max) dihitung di database; total titik dibatasi ~20.000 (lebih dari itu → 400 VALIDATION_ERROR dengan saran bucket/rentang).
          *     - Data lebih tua dari 30 hari hanya ada sebagai agregat (rollup 1 menit), bucket tetap 1m/5m/1h.
-         *     - Bucket tanpa sampel tidak muncul; titik null dibuang; `temperature` null (sensor error) tidak muncul sebagai titik.
+         *     - Bucket tanpa sampel tidak muncul; titik null dibuang; `temperature` null (sensor error) dan `soc` null (perangkat tidak mengirim) tidak muncul sebagai titik (bukan 0).
          *     Mendukung ETag/If-None-Match.
          */
         get: operations["getDeviceHistory"];
@@ -411,6 +411,8 @@ export interface components {
             powerW: number | null;
             /** @description null = sensor error / tidak ada pembacaan. */
             temperatureC: number | null;
+            /** @description SoC dari coulomb counter BMS (0–100 %). null = perangkat tidak mengirim. */
+            socPercent: number | null;
             /** @description Selisih cell tertinggi − terendah (mV). */
             cellDeltaMv: number | null;
             cellCount: number;
@@ -444,9 +446,18 @@ export interface components {
         PackDetail: {
             index: number;
             temperatureC: number | null;
+            /** @description Balancer TERHUBUNG (bukan berarti sedang balancing; lihat `balancing`). */
             balancerConnected: boolean;
+            /** @description Balancer sedang aktif balancing saat ini. null = perangkat tidak mengirim. */
+            balancing: boolean | null;
             currentA: number | null;
             powerW: number | null;
+            /** @description SoC dari coulomb counter BMS (0–100 %). null = perangkat tidak mengirim. */
+            socPercent: number | null;
+            /** @description Sisa kapasitas (Ah). null = perangkat tidak mengirim. */
+            remainingCapacityAh: number | null;
+            /** @description Kapasitas setting BMS (Ah). null = perangkat tidak mengirim. */
+            capacityAh: number | null;
             voltageV: number | null;
             cellDeltaMv: number | null;
             /**
@@ -523,11 +534,11 @@ export interface components {
             cellIndex: number | null;
             metric: components["schemas"]["HistoryMetric"];
             /** @enum {string} */
-            unit: "C" | "A" | "W" | "V";
+            unit: "C" | "A" | "W" | "V" | "%";
             points: components["schemas"]["HistoryPoint"][];
         };
         /** @enum {string} */
-        HistoryMetric: "temperature" | "current" | "power" | "voltage";
+        HistoryMetric: "temperature" | "current" | "power" | "voltage" | "soc";
         HistoryPoint: {
             /**
              * Format: date-time
@@ -1255,7 +1266,7 @@ export interface operations {
                 /** @description ISO-8601 UTC; default = sekarang. */
                 to?: string;
                 bucket?: components["schemas"]["HistoryBucket"];
-                /** @description CSV dari temperature,current,power,voltage. Default: temperature,current,power. `voltage` = per cell (banyak seri). */
+                /** @description CSV dari temperature,current,power,voltage,soc. Default: temperature,current,power. `voltage` = per cell (banyak seri). `soc` = SoC BMS per pack (%), hanya ada bila perangkat mengirimnya. */
                 metrics?: string;
                 /** @description Batasi ke satu pack. */
                 packIndex?: number | null;

@@ -68,7 +68,8 @@ async function packAggRaw(deviceId: string, p: HistoryParams, from: Date, to: Da
     SELECT "packIndex", ${bucketExpr("recordedAt", sec)} AS t,
       avg("temperature") AS "tempAvg", min("temperature") AS "tempMin", max("temperature") AS "tempMax", count("temperature")::int AS "tempN",
       avg("current") AS "curAvg", min("current") AS "curMin", max("current") AS "curMax", count("current")::int AS "curN",
-      avg("power") AS "powAvg", min("power") AS "powMin", max("power") AS "powMax", count("power")::int AS "powN"
+      avg("power") AS "powAvg", min("power") AS "powMin", max("power") AS "powMax", count("power")::int AS "powN",
+      avg("soc") AS "socAvg", min("soc") AS "socMin", max("soc") AS "socMax", count("soc")::int AS "socN"
     FROM "PackHistory"
     WHERE "deviceId" = ${deviceId} AND "recordedAt" >= ${ts(from)} AND "recordedAt" <= ${ts(to)} ${packFilter(p)}
     GROUP BY 1, 2`);
@@ -79,7 +80,8 @@ async function packAggRollup(deviceId: string, p: HistoryParams, from: Date, bou
     SELECT "packIndex", ${bucketExpr("bucketStart", sec)} AS t,
       sum("tempAvg" * "tempCount") / NULLIF(sum("tempCount"), 0) AS "tempAvg", min("tempMin") AS "tempMin", max("tempMax") AS "tempMax", coalesce(sum("tempCount"), 0)::int AS "tempN",
       sum("currentAvg" * "currentCount") / NULLIF(sum("currentCount"), 0) AS "curAvg", min("currentMin") AS "curMin", max("currentMax") AS "curMax", coalesce(sum("currentCount"), 0)::int AS "curN",
-      sum("powerAvg" * "powerCount") / NULLIF(sum("powerCount"), 0) AS "powAvg", min("powerMin") AS "powMin", max("powerMax") AS "powMax", coalesce(sum("powerCount"), 0)::int AS "powN"
+      sum("powerAvg" * "powerCount") / NULLIF(sum("powerCount"), 0) AS "powAvg", min("powerMin") AS "powMin", max("powerMax") AS "powMax", coalesce(sum("powerCount"), 0)::int AS "powN",
+      sum("socAvg" * "socCount") / NULLIF(sum("socCount"), 0) AS "socAvg", min("socMin") AS "socMin", max("socMax") AS "socMax", coalesce(sum("socCount"), 0)::int AS "socN"
     FROM "PackRollup1m"
     WHERE "deviceId" = ${deviceId} AND "bucketStart" >= ${ts(new Date(Math.floor(from.getTime() / 60_000) * 60_000))} AND "bucketStart" < ${ts(boundary)} ${packFilter(p)}
     GROUP BY 1, 2`);
@@ -132,7 +134,7 @@ export async function loadHistory(
     }
     const after = p.cursor ? Prisma.sql`AND ("recordedAt", "packIndex") > (${ts(p.cursor.t)}, ${p.cursor.p})` : Prisma.empty;
     const rows = await prisma.$queryRaw<PackRawRow[]>(Prisma.sql`
-      SELECT "packIndex", "recordedAt" AS t, "temperature", "current", "power"
+      SELECT "packIndex", "recordedAt" AS t, "temperature", "current", "power", "soc"
       FROM "PackHistory"
       WHERE "deviceId" = ${deviceId} AND "recordedAt" >= ${ts(p.from)} AND "recordedAt" <= ${ts(p.to)} ${packFilter(p)} ${after}
       ORDER BY "recordedAt", "packIndex" LIMIT ${limit + 1}`);

@@ -33,9 +33,9 @@ describe("device-view", () => {
     expect(onlineThresholdSec({ DEVICE_ONLINE_THRESHOLD_SEC: "abc" })).toBe(180);
     expect(onlineThresholdSec({})).toBe(180);
   });
-  it("deviceStats: suhu maks (abaikan null), delta maks, daya total, min/maks cell, tanpa SoC", () => {
+  it("deviceStats: suhu maks (abaikan null), delta maks, daya total, min/maks cell, SoC BMS diteruskan apa adanya, tanpa SoH", () => {
     const s = deviceStats([
-      pack({ index: 1, temperature: null, power: -20, cells: [{ voltage: 3.2 }, { voltage: 3.25 }] }),
+      pack({ index: 1, temperature: null, power: -20, soc: 69, cells: [{ voltage: 3.2 }, { voltage: 3.25 }] }),
       pack({ index: 0 }),
     ]);
     expect(s.packs.map((p) => p.index)).toEqual([0, 1]); // terurut
@@ -44,7 +44,8 @@ describe("device-view", () => {
     expect(s.maxCellDeltaMv).toBe(50);
     expect(s.minCellVoltageV).toBe(3.2);
     expect(s.maxCellVoltageV).toBe(3.32);
-    expect(JSON.stringify(s)).not.toMatch(/soc|soh|stateOfCharge/i);
+    expect(s.packs.map((p) => p.socPercent)).toEqual([null, 69]); // pack tanpa soc -> null, bukan 0
+    expect(JSON.stringify(s)).not.toMatch(/soh|stateOfHealth/i);
   });
   it("semua sensor null / tanpa pack -> nilai null (bukan 0 atau NaN)", () => {
     const s = deviceStats([pack({ temperature: null, power: null, current: null })]);

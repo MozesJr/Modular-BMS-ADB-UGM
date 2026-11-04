@@ -12,6 +12,9 @@ export const MAX_CELLS_PER_PACK = 64;
 export const TEMPERATURE_MIN_C = -60;
 export const TEMPERATURE_MAX_C = 150;
 
+// Batas atas wajar kapasitas (Ah) — mencegah nilai ngawur, bukan batas fisik.
+export const MAX_CAPACITY_AH = 100_000;
+
 // device_id di topik = Device.serialNumber. Sengaja ketat: tanpa "/", "+", "#", spasi.
 export const DEVICE_ID_REGEX = /^[A-Za-z0-9._-]{1,64}$/;
 
@@ -41,6 +44,14 @@ export const BmsPackSchema = z
     balancerConnected: z.boolean(),
     current: optionalNumber(-1000, 1000), // A; negatif = charging, positif = discharging
     power: optionalNumber(-1_000_000, 1_000_000), // W = voltage_pack × current
+    // Field dari coulomb counter BMS (JK-BMS). SEMUA opsional + nullable: ESP32 lama & simulator tidak mengirimnya.
+    soc: optionalNumber(0, 100), // % (0–100), SoC dari BMS
+    remainingCapacity: optionalNumber(0, MAX_CAPACITY_AH), // Ah
+    capacity: optionalNumber(0, MAX_CAPACITY_AH), // Ah, kapasitas setting BMS
+    balancing: z
+      .boolean()
+      .nullish()
+      .transform((v) => v ?? undefined), // true = balancer sedang aktif balancing SAAT INI (beda dari balancerConnected)
     cells: z.array(BmsCellSchema).min(1).max(MAX_CELLS_PER_PACK),
   })
   .refine((p) => new Set(p.cells.map((c) => c.index)).size === p.cells.length, {

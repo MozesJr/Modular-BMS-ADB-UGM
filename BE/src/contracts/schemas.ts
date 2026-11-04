@@ -10,7 +10,7 @@ import { emailSchema, serialNumberSchema } from "./common";
 //     `nullable` hanya untuk tipe primitif (string/number/integer/boolean).
 //   - Satuan ada di NAMA field: voltageV (V), currentA (A), powerW (W), temperatureC (°C), cellDeltaMv (mV).
 //   - Semua waktu = string ISO-8601 UTC (`2026-09-21T08:15:00.000Z`).
-//   - Tidak ada SoC/SoH (belum ada di payload perangkat).
+//   - SoC datang dari coulomb counter BMS (socPercent, nullable: perangkat lama/simulator tidak mengirimnya). Tidak ada SoH.
 // ============================================================================================
 
 const iso = () => z.iso.datetime({ offset: false }).openapi({ example: "2026-09-21T08:15:00.000Z" });
@@ -82,6 +82,7 @@ export const PackSummarySchema = z
     currentA: z.number().nullable().openapi({ description: "Ampere; NEGATIF = charging, positif = discharging." }),
     powerW: z.number().nullable(),
     temperatureC: z.number().nullable().openapi({ description: "null = sensor error / tidak ada pembacaan." }),
+    socPercent: z.number().nullable().openapi({ description: "SoC dari coulomb counter BMS (0–100 %). null = perangkat tidak mengirim." }),
     cellDeltaMv: z.number().nullable().openapi({ description: "Selisih cell tertinggi − terendah (mV)." }),
     cellCount: z.number().int(),
   })
@@ -132,9 +133,13 @@ export const PackDetailSchema = z
   .object({
     index: z.number().int(),
     temperatureC: z.number().nullable(),
-    balancerConnected: z.boolean(),
+    balancerConnected: z.boolean().openapi({ description: "Balancer TERHUBUNG (bukan berarti sedang balancing; lihat `balancing`)." }),
+    balancing: z.boolean().nullable().openapi({ description: "Balancer sedang aktif balancing saat ini. null = perangkat tidak mengirim." }),
     currentA: z.number().nullable(),
     powerW: z.number().nullable(),
+    socPercent: z.number().nullable().openapi({ description: "SoC dari coulomb counter BMS (0–100 %). null = perangkat tidak mengirim." }),
+    remainingCapacityAh: z.number().nullable().openapi({ description: "Sisa kapasitas (Ah). null = perangkat tidak mengirim." }),
+    capacityAh: z.number().nullable().openapi({ description: "Kapasitas setting BMS (Ah). null = perangkat tidak mengirim." }),
     voltageV: z.number().nullable(),
     cellDeltaMv: z.number().nullable(),
     recordedAt: iso().nullable().openapi({ description: "Waktu efektif data (jam device bila wajar, selain itu waktu server)." }),
@@ -200,7 +205,7 @@ export const DashboardSummarySchema = z
 
 // ---------- history ----------
 export const HistoryBucketSchema = z.enum(["raw", "1m", "5m", "1h"]).openapi("HistoryBucket");
-export const HistoryMetricSchema = z.enum(["temperature", "current", "power", "voltage"]).openapi("HistoryMetric");
+export const HistoryMetricSchema = z.enum(["temperature", "current", "power", "voltage", "soc"]).openapi("HistoryMetric");
 
 export const HistoryPointSchema = z
   .object({
@@ -217,7 +222,7 @@ export const HistorySeriesSchema = z
     packIndex: z.number().int(),
     cellIndex: z.number().int().nullable().openapi({ description: "null untuk seri level pack." }),
     metric: HistoryMetricSchema,
-    unit: z.enum(["C", "A", "W", "V"]),
+    unit: z.enum(["C", "A", "W", "V", "%"]),
     points: z.array(HistoryPointSchema),
   })
   .openapi("HistorySeries");
@@ -237,7 +242,7 @@ export const HistoryQuerySchema = z.object({
   from: z.string().optional().openapi({ description: "ISO-8601 UTC; default = to − 24 jam." }),
   to: z.string().optional().openapi({ description: "ISO-8601 UTC; default = sekarang." }),
   bucket: HistoryBucketSchema.default("5m"),
-  metrics: z.string().optional().openapi({ description: "CSV dari temperature,current,power,voltage. Default: temperature,current,power. `voltage` = per cell (banyak seri)." }),
+  metrics: z.string().optional().openapi({ description: "CSV dari temperature,current,power,voltage,soc. Default: temperature,current,power. `voltage` = per cell (banyak seri). `soc` = SoC BMS per pack (%), hanya ada bila perangkat mengirimnya." }),
   packIndex: z.coerce.number().int().min(0).optional().openapi({ description: "Batasi ke satu pack." }),
   cursor: z.string().max(300).optional(),
   limit: z.coerce.number().int().min(1).max(5000).optional().openapi({ description: "Hanya untuk raw: maks sampel per halaman (default 1000)." }),

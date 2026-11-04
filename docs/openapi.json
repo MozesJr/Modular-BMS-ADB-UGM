@@ -478,6 +478,11 @@
             "nullable": true,
             "description": "null = sensor error / tidak ada pembacaan."
           },
+          "socPercent": {
+            "type": "number",
+            "nullable": true,
+            "description": "SoC dari coulomb counter BMS (0–100 %). null = perangkat tidak mengirim."
+          },
           "cellDeltaMv": {
             "type": "number",
             "nullable": true,
@@ -493,6 +498,7 @@
           "currentA",
           "powerW",
           "temperatureC",
+          "socPercent",
           "cellDeltaMv",
           "cellCount"
         ]
@@ -582,7 +588,13 @@
             "nullable": true
           },
           "balancerConnected": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Balancer TERHUBUNG (bukan berarti sedang balancing; lihat `balancing`)."
+          },
+          "balancing": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Balancer sedang aktif balancing saat ini. null = perangkat tidak mengirim."
           },
           "currentA": {
             "type": "number",
@@ -591,6 +603,21 @@
           "powerW": {
             "type": "number",
             "nullable": true
+          },
+          "socPercent": {
+            "type": "number",
+            "nullable": true,
+            "description": "SoC dari coulomb counter BMS (0–100 %). null = perangkat tidak mengirim."
+          },
+          "remainingCapacityAh": {
+            "type": "number",
+            "nullable": true,
+            "description": "Sisa kapasitas (Ah). null = perangkat tidak mengirim."
+          },
+          "capacityAh": {
+            "type": "number",
+            "nullable": true,
+            "description": "Kapasitas setting BMS (Ah). null = perangkat tidak mengirim."
           },
           "voltageV": {
             "type": "number",
@@ -625,8 +652,12 @@
           "index",
           "temperatureC",
           "balancerConnected",
+          "balancing",
           "currentA",
           "powerW",
+          "socPercent",
+          "remainingCapacityAh",
+          "capacityAh",
           "voltageV",
           "cellDeltaMv",
           "recordedAt",
@@ -809,7 +840,8 @@
               "C",
               "A",
               "W",
-              "V"
+              "V",
+              "%"
             ]
           },
           "points": {
@@ -834,7 +866,8 @@
           "temperature",
           "current",
           "power",
-          "voltage"
+          "voltage",
+          "soc"
         ]
       },
       "HistoryPoint": {
@@ -1831,7 +1864,7 @@
           "Riwayat"
         ],
         "summary": "Riwayat telemetri (time-series)",
-        "description": "Seri per pack (`temperature` °C, `current` A, `power` W) atau per cell (`voltage` V). Default: 24 jam terakhir, bucket 5m, metrics temperature,current,power.\n\n- `bucket=raw`: sampel asli; rentang maks 48 jam; `voltage` tidak boleh digabung dengan metrik pack; halaman berikutnya lewat `nextCursor` → `?cursor=`.\n- `bucket=1m|5m|1h`: agregat (v = rata-rata, min, max) dihitung di database; total titik dibatasi ~20.000 (lebih dari itu → 400 VALIDATION_ERROR dengan saran bucket/rentang).\n- Data lebih tua dari 30 hari hanya ada sebagai agregat (rollup 1 menit), bucket tetap 1m/5m/1h.\n- Bucket tanpa sampel tidak muncul; titik null dibuang; `temperature` null (sensor error) tidak muncul sebagai titik.\nMendukung ETag/If-None-Match.",
+        "description": "Seri per pack (`temperature` °C, `current` A, `power` W, `soc` % — SoC BMS, opsional) atau per cell (`voltage` V). Default: 24 jam terakhir, bucket 5m, metrics temperature,current,power.\n\n- `bucket=raw`: sampel asli; rentang maks 48 jam; `voltage` tidak boleh digabung dengan metrik pack; halaman berikutnya lewat `nextCursor` → `?cursor=`.\n- `bucket=1m|5m|1h`: agregat (v = rata-rata, min, max) dihitung di database; total titik dibatasi ~20.000 (lebih dari itu → 400 VALIDATION_ERROR dengan saran bucket/rentang).\n- Data lebih tua dari 30 hari hanya ada sebagai agregat (rollup 1 menit), bucket tetap 1m/5m/1h.\n- Bucket tanpa sampel tidak muncul; titik null dibuang; `temperature` null (sensor error) dan `soc` null (perangkat tidak mengirim) tidak muncul sebagai titik (bukan 0).\nMendukung ETag/If-None-Match.",
         "operationId": "getDeviceHistory",
         "security": [
           {
@@ -1880,10 +1913,10 @@
           {
             "schema": {
               "type": "string",
-              "description": "CSV dari temperature,current,power,voltage. Default: temperature,current,power. `voltage` = per cell (banyak seri)."
+              "description": "CSV dari temperature,current,power,voltage,soc. Default: temperature,current,power. `voltage` = per cell (banyak seri). `soc` = SoC BMS per pack (%), hanya ada bila perangkat mengirimnya."
             },
             "required": false,
-            "description": "CSV dari temperature,current,power,voltage. Default: temperature,current,power. `voltage` = per cell (banyak seri).",
+            "description": "CSV dari temperature,current,power,voltage,soc. Default: temperature,current,power. `voltage` = per cell (banyak seri). `soc` = SoC BMS per pack (%), hanya ada bila perangkat mengirimnya.",
             "name": "metrics",
             "in": "query"
           },

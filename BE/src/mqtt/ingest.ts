@@ -85,16 +85,22 @@ export async function persistSnapshot(job: IngestJob): Promise<PersistResult> {
         (p) =>
           Prisma.sql`(${randomUUID()}, ${p.index}, ${device.id}, ${p.temperature}, ${p.balancerConnected}, ${
             p.current ?? null
-          }, ${p.power ?? null}, ${ts(recordedAt)}, ${ts(receivedAt)}, ${NOW_UTC})`,
+          }, ${p.power ?? null}, ${p.soc ?? null}::double precision, ${p.remainingCapacity ?? null}::double precision, ${
+            p.capacity ?? null
+          }::double precision, ${p.balancing ?? null}::boolean, ${ts(recordedAt)}, ${ts(receivedAt)}, ${NOW_UTC})`,
       );
       const updatedPacks = await tx.$queryRaw<{ id: string; index: number }[]>(Prisma.sql`
-        INSERT INTO "Pack" ("id","index","deviceId","temperature","balancerConnected","current","power","recordedAt","receivedAt","updatedAt")
+        INSERT INTO "Pack" ("id","index","deviceId","temperature","balancerConnected","current","power","soc","remainingCapacity","capacity","balancing","recordedAt","receivedAt","updatedAt")
         VALUES ${Prisma.join(packValues)}
         ON CONFLICT ("deviceId","index") DO UPDATE SET
           "temperature" = EXCLUDED."temperature",
           "balancerConnected" = EXCLUDED."balancerConnected",
           "current" = EXCLUDED."current",
           "power" = EXCLUDED."power",
+          "soc" = EXCLUDED."soc",
+          "remainingCapacity" = EXCLUDED."remainingCapacity",
+          "capacity" = EXCLUDED."capacity",
+          "balancing" = EXCLUDED."balancing",
           "recordedAt" = EXCLUDED."recordedAt",
           "receivedAt" = EXCLUDED."receivedAt",
           "updatedAt" = EXCLUDED."updatedAt"
@@ -131,6 +137,10 @@ export async function persistSnapshot(job: IngestJob): Promise<PersistResult> {
           balancerConnected: pack.balancerConnected,
           current: pack.current ?? null,
           power: pack.power ?? null,
+          soc: pack.soc ?? null,
+          remainingCapacity: pack.remainingCapacity ?? null,
+          capacity: pack.capacity ?? null,
+          balancing: pack.balancing ?? null,
           recordedAt,
           receivedAt,
         });

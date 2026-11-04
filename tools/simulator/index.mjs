@@ -1,12 +1,18 @@
 // BMS publisher simulator (dev lokal). Meniru kontrak payload MQTT firmware:
 //   topic  bms/{serialNumber}/data
-//   body   { timestamp, packs:[{ index, temperature, balancerConnected, current, power, cells:[{index,voltage}] }] }
+//   body   { timestamp, packs:[{ index, temperature, balancerConnected, current, power,
+//                               soc, remainingCapacity, capacity, balancing, cells:[{index,voltage}] }] }
+// soc/remainingCapacity/capacity/balancing = field opsional dari coulomb counter BMS (lihat docs/MQTT-CONTRACT.md §2).
+// TEMP_PROBE=0 -> temperature dikirim null (probe NTC belum terpasang).
 // Variasi realistis LiFePO4: cell 3.25–3.45 V, fase charge (current negatif) & discharge
 // bergantian, sesekali imbalance > 50 mV, suhu 26–40 °C. Tidak menyentuh broker/DB produksi.
 import mqtt from "mqtt";
 
 const MQTT_URL = process.env.MQTT_URL ?? "mqtt://localhost:1883";
 const INTERVAL_MS = Number(process.env.INTERVAL_MS ?? 10000);
+const TEMP_PROBE = process.env.TEMP_PROBE !== "0";
+const CAPACITY_AH = Number(process.env.CAPACITY_AH ?? 30);
+const BALANCE_DELTA_MV = 10; // balancing aktif bila delta cell > 10 mV
 const DEVICE_COUNT = Math.max(1, Math.min(3, Number(process.env.DEVICE_COUNT ?? 1)));
 
 const rnd = (min, max) => min + Math.random() * (max - min);
@@ -76,15 +82,25 @@ function stepPack(pack, cellCount) {
   // Suhu random walk, naik sedikit saat arus besar.
   pack.temp = clamp(pack.temp + rnd(-0.4, 0.4) + Math.abs(current) * 0.05, 26, 40);
 
-  const balancerConnected = injectImbalance || Math.random() < 0.6;
+  // Balancer terpasang (terhubung) terus; "balancing" hanya aktif saat memang ada ketidakseimbangan.
+  const balancerConnected = true;
+  const volts = cells.map((c) => c.voltage);
+  const deltaMv = (Math.max(...volts) - Math.min(...volts)) * 1000;
+  const balancing = deltaMv > BALANCE_DELTA_MV;
+  // SoC mengikuti `level` yang naik saat charge (arus negatif) dan turun saat discharge.
+  const soc = Math.round(pack.level * 100);
   const packVoltage = cells.reduce((s, c) => s + c.voltage, 0);
   const power = Math.round(packVoltage * current * 100) / 100;
 
   return {
-    temperature: Math.round(pack.temp * 10) / 10,
+    temperature: TEMP_PROBE ? Math.round(pack.temp * 10) / 10 : null,
     balancerConnected,
     current: Math.round(current * 100) / 100,
     power,
+    soc,
+    remainingCapacity: Math.round(CAPACITY_AH * soc) / 100, // = capacity × soc / 100, 1–2 desimal
+    capacity: CAPACITY_AH,
+    balancing,
     cells,
   };
 }
@@ -110,7 +126,7 @@ function tick() {
     const payload = { timestamp, packs };
     const topic = `bms/${dev.serial}/data`;
     client.publish(topic, JSON.stringify(payload), { qos: 1 });
-    console.log(`[sim] ${topic} packs=${packs.length} cell0=${packs[0].cells[0].voltage}V I=${packs[0].current}A`);
+    console.log(`[sim] ${topic} packs=${packs.length} cell0=${packs[0].cells[0].voltage}V I=${packs[0].current}A soc=${packs[0].soc}% bal=${packs[0].balancing ? "on" : "idle"}`);
   }
 }
 

@@ -35,6 +35,10 @@ d("ingestion (DB nyata sekali-pakai)", () => {
         balancerConnected: true,
         current: -1.5,
         power: -80,
+        soc: undefined as number | undefined,
+        remainingCapacity: undefined as number | undefined,
+        capacity: undefined as number | undefined,
+        balancing: undefined as boolean | undefined,
         cells: [
           { index: 0, voltage: volt },
           { index: 1, voltage: volt + 0.01 },
@@ -122,6 +126,24 @@ d("ingestion (DB nyata sekali-pakai)", () => {
     });
     expect(hist.temperature).toBeNull();
     expect(await prisma.cellHistory.count({ where: { deviceId: dev.id } })).toBe(4);
+  });
+
+  it("field BMS baru (soc/kapasitas/balancing) disimpan di state terbaru + history; payload lama -> NULL", async () => {
+    const s = serial();
+    const withBms = job(s, "2026-09-21T09:00:00.000Z", null);
+    withBms.payload.packs[0] = { ...withBms.payload.packs[0], soc: 69, remainingCapacity: 20.7, capacity: 30, balancing: false };
+    await persistWithRetry(withBms);
+    const dev = await prisma.device.findUniqueOrThrow({ where: { serialNumber: s }, include: { packs: true } });
+    expect(dev.packs[0]).toMatchObject({ temperature: null, soc: 69, remainingCapacity: 20.7, capacity: 30, balancing: false });
+    const h1 = await prisma.packHistory.findFirstOrThrow({ where: { deviceId: dev.id } });
+    expect(h1).toMatchObject({ soc: 69, remainingCapacity: 20.7, capacity: 30, balancing: false });
+
+    // pesan berikutnya tanpa field baru (firmware lama): kolom jadi NULL, bukan 0
+    await persistWithRetry(job(s, "2026-09-21T09:00:05.000Z", 25));
+    const dev2 = await prisma.device.findUniqueOrThrow({ where: { serialNumber: s }, include: { packs: true } });
+    expect(dev2.packs[0]).toMatchObject({ soc: null, remainingCapacity: null, capacity: null, balancing: null });
+    const h2 = await prisma.packHistory.findFirstOrThrow({ where: { deviceId: dev.id, recordedAt: new Date("2026-09-21T09:00:05.000Z") } });
+    expect(h2).toMatchObject({ soc: null, balancing: null });
   });
 
   it("pesan lebih baru menimpa state terbaru", async () => {

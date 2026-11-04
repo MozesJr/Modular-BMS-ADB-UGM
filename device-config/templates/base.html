@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Setelan {{ S.AP_SSID }}</title>
+<style>
+  /* Semua inline: di mode setup HP tidak punya internet, jadi tidak boleh ada CDN. */
+  :root { --bg:#f4f5f7; --card:#fff; --ink:#1c2330; --mute:#667085; --line:#d9dde3;
+          --pri:#1d5fd1; --ok:#17794a; --err:#b42318; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12151a; --card:#1b2028; --ink:#e8ebf0; --mute:#98a2b3; --line:#2e3542;
+            --pri:#6ea2ff; --ok:#4cc38a; --err:#ff7b6b; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  main { max-width:560px; margin:0 auto; padding:16px; }
+  header { display:flex; justify-content:space-between; align-items:center; margin:8px 0 16px; }
+  h1 { font-size:20px; margin:0; }
+  h2 { font-size:16px; margin:0 0 12px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px;
+            padding:16px; margin-bottom:16px; }
+  label { display:block; font-size:14px; color:var(--mute); margin:10px 0 4px; }
+  input[type=text], input[type=password], input[type=number] {
+    width:100%; padding:10px; font-size:16px; color:var(--ink); background:var(--bg);
+    border:1px solid var(--line); border-radius:8px; }
+  .check { display:flex; gap:8px; align-items:center; color:var(--ink); }
+  .check input { width:18px; height:18px; }
+  button { margin-top:14px; padding:10px 16px; font-size:16px; border:0; border-radius:8px;
+           background:var(--pri); color:#fff; cursor:pointer; }
+  button.danger { background:var(--err); }
+  button.link { background:none; color:var(--pri); padding:0; margin:0; font-size:14px; }
+  .msg { padding:10px 12px; border-radius:8px; margin-bottom:12px; border:1px solid; }
+  .msg.ok { color:var(--ok); border-color:var(--ok); }
+  .msg.err { color:var(--err); border-color:var(--err); }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:4px 16px; margin:0; }
+  dt { color:var(--mute); } dd { margin:0; word-break:break-word; }
+  .hint { font-size:13px; color:var(--mute); margin:6px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% for cat, m in msgs %}<div class="msg {{ cat }}">{{ m }}</div>{% endfor %}
+  {% endwith %}
+  {% block body %}{% endblock %}
+</main>
+</body>
+</html>

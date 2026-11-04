@@ -5,7 +5,7 @@ import paho.mqtt.client as mqtt
 BROKER    = os.environ.get("MQTT_BROKER_HOST", "72.61.208.150")
 PORT      = int(os.environ.get("MQTT_BROKER_PORT", "1883"))
 USERNAME  = os.environ.get("MQTT_USERNAME", "esp32_device")   # ACL: hanya akun ini boleh publish bms/+/data
-PASSWORD  = os.environ.get("MQTT_PASSWORD", "eo6eCnnnY1K2YrJ1PgDwLH6")
+PASSWORD  = os.environ.get("MQTT_PASSWORD", "")  # WAJIB dari env, tanpa default
 DEVICE_ID = os.environ.get("DEVICE_ID", "GAMA-BMS-PACK-001")
 INTERVAL  = int(os.environ.get("PUBLISH_INTERVAL", "10"))     # samakan dgn ESP32; >20s = gap di chart
 

@@ -81,6 +81,12 @@ describe("parseBmsMessage", () => {
     ["index pack duplikat", (p: any) => p.packs.push({ ...p.packs[0] })],
     ["balancerConnected bukan boolean", (p: any) => (p.packs[0].balancerConnected = "yes")],
     ["arus di luar rentang", (p: any) => (p.packs[0].current = 99999)],
+    ["soc > 100", (p: any) => (p.packs[0].soc = 101)],
+    ["soc negatif", (p: any) => (p.packs[0].soc = -1)],
+    ["soc bukan angka", (p: any) => (p.packs[0].soc = "69")],
+    ["capacity negatif", (p: any) => (p.packs[0].capacity = -1)],
+    ["remainingCapacity negatif", (p: any) => (p.packs[0].remainingCapacity = -0.1)],
+    ["balancing bukan boolean", (p: any) => (p.packs[0].balancing = "yes")],
   ])("menolak: %s", (_name, mutate) => {
     const p = validPayload();
     mutate(p);
@@ -90,6 +96,48 @@ describe("parseBmsMessage", () => {
     const p = validPayload();
     p.packs[0].cells = Array.from({ length: 65 }, (_, i) => ({ index: i, voltage: 3.3 }));
     expect(parseBmsMessage(TOPIC, buf(p)).ok).toBe(false);
+  });
+});
+
+describe("field BMS baru: soc / remainingCapacity / capacity / balancing", () => {
+  const bms = {
+    soc: 69,
+    remainingCapacity: 20.7,
+    capacity: 30.0,
+    balancing: false,
+  };
+  it("menerima semua field baru apa adanya", () => {
+    const p = validPayload();
+    Object.assign(p.packs[0], bms);
+    const r = parseBmsMessage(TOPIC, buf(p));
+    expect(r.ok && r.payload.packs[0]).toMatchObject(bms);
+  });
+  it("tanpa field baru (ESP32 lama / simulator) tetap valid", () => {
+    const r = parseBmsMessage(TOPIC, buf(validPayload()));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const pk = r.payload.packs[0];
+      expect([pk.soc, pk.remainingCapacity, pk.capacity, pk.balancing]).toEqual([undefined, undefined, undefined, undefined]);
+    }
+  });
+  it("null di semua field baru dianggap tidak ada (bukan 0) dan temperature null ikut valid", () => {
+    const p = validPayload();
+    Object.assign(p.packs[0], { soc: null, remainingCapacity: null, capacity: null, balancing: null, temperature: null });
+    const r = parseBmsMessage(TOPIC, buf(p));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.payload.packs[0].soc).toBeUndefined();
+      expect(r.payload.packs[0].balancing).toBeUndefined();
+      expect(r.payload.packs[0].temperature).toBeNull();
+      expect(r.sensorFaults).toBe(0);
+    }
+  });
+  it("batas: soc 0 dan 100, kapasitas 0 diterima; balancing true diterima", () => {
+    for (const soc of [0, 100]) {
+      const p = validPayload();
+      Object.assign(p.packs[0], { ...bms, soc, capacity: 0, balancing: true });
+      expect(parseBmsMessage(TOPIC, buf(p)).ok).toBe(true);
+    }
   });
 });
 

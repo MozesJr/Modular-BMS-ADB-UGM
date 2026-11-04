@@ -23,11 +23,11 @@ REST + WebSocket (/ws)
 ### Skema data (hierarki)
 
 Device (id, owner, verified, collaborators)
-└── Pack (index, temperature, balancerConnected)
+└── Pack (index, temperature, balancerConnected, current, power, soc, remainingCapacity, capacity, balancing)
 └── Cell (index, voltage)
 
 - **Cell**: voltage dari voltage divider terkalibrasi
-- **Pack**: terhubung ke active balancer (EK-C8S5A), suhu dari DS18B20
+- **Pack**: terhubung ke active balancer (EK-C8S5A), suhu (nullable; `null` bila probe belum terpasang). Bila publisher JK-BMS dipakai: `soc`, `remainingCapacity`, `capacity` dari coulomb counter BMS dan `balancing` (balancer sedang aktif) — semuanya opsional/nullable, lihat [docs/MQTT-CONTRACT.md](docs/MQTT-CONTRACT.md)
 - **Device**: jumlah pack/cell dinamis per BMS
 
 ## Struktur Folder

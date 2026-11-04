@@ -53,6 +53,48 @@
               }
             ]
           },
+          "soc": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "remainingCapacity": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "capacity": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "balancing": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "cells": {
             "minItems": 1,
             "maxItems": 64,
