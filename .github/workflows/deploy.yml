@@ -18,10 +18,49 @@ jobs:
           port: ${{ secrets.VPS_PORT }}
           command_timeout: 30m
           script: |
+            # set -e: langkah mana pun yang gagal (termasuk migrate) menghentikan deploy;
+            # backend/frontend TIDAK di-restart. Jangan pakai pipe (| tee) di langkah kritis: exit code bisa hilang.
             set -e
             cd /home/Modular-BMS-ADB-UGM
             git pull origin main
-            docker compose build
+            echo "==> Deploy commit: $(git rev-parse --short HEAD)"
+
+            # 1) Build SEMUA image dari commit terbaru. --profile tools wajib: tanpa itu service
+            #    backend-migrate (profile "tools") dilewati dan image migrator tetap versi lama,
+            #    sehingga migration baru tidak pernah ter-apply ("No pending migrations").
+            docker compose --profile tools build
+
+            # 2) Pastikan image migrator memang berisi migration terbaru (bandingkan dengan repo).
+            REPO_MIGRATIONS=$(ls -d BE/prisma/migrations/*/ | wc -l | tr -d ' ')
+            IMAGE_MIGRATIONS=$(docker compose --profile tools run --rm -T backend-migrate sh -c 'ls -d prisma/migrations/*/ | wc -l' | tr -d ' \r')
+            echo "==> Migration di repo: $REPO_MIGRATIONS | di image backend-migrate: $IMAGE_MIGRATIONS"
+            if [ "$REPO_MIGRATIONS" != "$IMAGE_MIGRATIONS" ]; then
+              echo "!! Image backend-migrate tidak sinkron dengan repo. Deploy dihentikan (backend TIDAK di-restart)."
+              exit 1
+            fi
+
+            # 3) Jalankan migrasi (output prisma mencetak "N migrations found in prisma/migrations"),
+            #    lalu verifikasi tidak ada yang tertunda. Gagal di sini = deploy berhenti.
+            echo "==> Menjalankan prisma migrate deploy"
             docker compose --profile tools run --rm -T backend-migrate
+            echo "==> Verifikasi prisma migrate status"
+            docker compose --profile tools run --rm -T backend-migrate npx prisma migrate status
+
+            # 4) Baru restart backend, tunggu healthy, lalu sisanya (frontend dll).
+            echo "==> Restart backend"
+            docker compose up -d backend
+            for i in $(seq 1 36); do
+              STATUS=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' bms-backend 2>/dev/null || echo missing)
+              echo "    backend health: $STATUS ($i/36)"
+              if [ "$STATUS" = "healthy" ]; then break; fi
+              sleep 5
+            done
+            if [ "$STATUS" != "healthy" ]; then
+              echo "!! Backend tidak healthy setelah restart. Frontend TIDAK di-deploy."
+              docker compose logs --tail=50 backend
+              exit 1
+            fi
+
+            echo "==> Deploy frontend & service lain"
             docker compose up -d
             docker image prune -f
