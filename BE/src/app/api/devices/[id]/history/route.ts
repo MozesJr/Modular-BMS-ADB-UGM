@@ -38,6 +38,7 @@ type TempAggRow = {
   tempavg: number | null;
   currentavg: number | null;
   poweravg: number | null;
+  socavg: number | null;
   balanceron: boolean;
 };
 type CellPerRow = {
@@ -63,6 +64,7 @@ type HistoryBucket = {
   tempAvg: number | null;
   currentAvg: number | null;
   powerAvg: number | null;
+  socAvg: number | null; // % dari BMS; null = tidak ada sampel soc di bucket (JANGAN dianggap 0)
   energyWh: number | null; // net (signed) — kompatibilitas
   energyInWh: number | null; // charge (positif)
   energyOutWh: number | null; // discharge (positif)
@@ -114,6 +116,7 @@ export const GET = route<{ params: Promise<{ id: string }> }>(async (req, { para
              AVG("temperature") AS tempavg,
              AVG("current") AS currentavg,
              AVG("power") AS poweravg,
+             AVG("soc") AS socavg,
              bool_or("balancerConnected") AS balanceron
       FROM "PackHistory"
       WHERE "deviceId" = ${id} AND "recordedAt" >= ${from}
@@ -193,6 +196,7 @@ export const GET = route<{ params: Promise<{ id: string }> }>(async (req, { para
         tempAvg: null,
         currentAvg: null,
         powerAvg: null,
+        socAvg: null,
         energyWh: null,
         energyInWh: null,
         energyOutWh: null,
@@ -217,6 +221,7 @@ export const GET = route<{ params: Promise<{ id: string }> }>(async (req, { para
     b.tempAvg = row.tempavg;
     b.currentAvg = row.currentavg;
     b.powerAvg = row.poweravg;
+    b.socAvg = row.socavg;
     b.balancerOn = row.balanceron;
   }
   for (const row of energyAgg) {

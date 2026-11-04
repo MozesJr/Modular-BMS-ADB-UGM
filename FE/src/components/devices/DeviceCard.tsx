@@ -91,7 +91,7 @@ function DeviceCardImpl({
   energyToday?: { inWh: number; outWh: number };
 }) {
   const [copied, setCopied] = useState(false);
-  const { freshness, neverReported, packs, health, realAlarms, soc, cellCount, worstDelta, totalPower } = deviceSummary(device, nowMs);
+  const { freshness, neverReported, packs, health, realAlarms, soc, socSource, cellCount, worstDelta, totalPower } = deviceSummary(device, nowMs);
   const meta = FRESHNESS_META[freshness.status];
   const hc = healthColor(health.score);
   const dim = freshness.status === "offline";
@@ -176,7 +176,7 @@ function DeviceCardImpl({
           <div className="grid grid-cols-2 gap-2 mb-3 text-center sm:grid-cols-4">
             <div>
               <div className="text-sm font-bold text-gray-800 dark:text-white tabular-nums">{soc != null ? `${soc.toFixed(0)}%` : "—"}</div>
-              <div className="text-[10px] text-gray-400">SoC est.</div>
+              <div className="text-[10px] text-gray-400" title={socSource === "bms" ? "SoC dari coulomb counter BMS" : "Estimasi dari tegangan (voltage-based)"}>{socSource === "bms" ? "SoC" : "SoC est."}</div>
             </div>
             <div>
               <div className={`text-sm font-bold tabular-nums ${worstDelta > 50 ? "text-red-500" : worstDelta > 20 ? "text-amber-500" : "text-gray-800 dark:text-white"}`}>{worstDelta} mV</div>

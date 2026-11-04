@@ -24,7 +24,8 @@ describe("resolveHistoryParams", () => {
   });
   it("metrics: csv, dedupe, tak dikenal ditolak, kosong ditolak", () => {
     expect(resolveHistoryParams({ ...base, metrics: "power, voltage,power" }, now).metrics).toEqual(["power", "voltage"]);
-    expect(code(() => resolveHistoryParams({ ...base, metrics: "soc" }, now))?.details?.[0].path).toBe("metrics");
+    expect(code(() => resolveHistoryParams({ ...base, metrics: "soh" }, now))?.details?.[0].path).toBe("metrics");
+    expect(resolveHistoryParams({ ...base, metrics: "soc,power" }, now).metrics).toEqual(["soc", "power"]);
     expect(code(() => resolveHistoryParams({ ...base, metrics: " , " }, now))?.code).toBe("VALIDATION_ERROR");
   });
   it("raw: rentang maks 48 jam dan tidak boleh mencampur voltage dengan metrik pack", () => {
@@ -64,9 +65,9 @@ describe("baris -> seri", () => {
   it("agregat: seri per pack per metrik, terurut, satuan benar, titik null dibuang", () => {
     const s = packAggToSeries(
       [
-        { packIndex: 1, t: t("10:05:00"), tempAvg: null, tempMin: null, tempMax: null, tempN: 0, curAvg: 1, curMin: 0.5, curMax: 2, curN: 1, powAvg: 10, powMin: 5, powMax: 15, powN: 1 },
-        { packIndex: 0, t: t("10:05:00"), tempAvg: 25.123456, tempMin: 25, tempMax: 26, tempN: 1, curAvg: -1, curMin: -2, curMax: 0, curN: 1, powAvg: -50, powMin: -60, powMax: -40, powN: 1 },
-        { packIndex: 0, t: t("10:00:00"), tempAvg: 24, tempMin: 23, tempMax: 25, tempN: 1, curAvg: null, curMin: null, curMax: null, curN: 0, powAvg: -40, powMin: -41, powMax: -39, powN: 1 },
+        { packIndex: 1, t: t("10:05:00"), tempAvg: null, tempMin: null, tempMax: null, tempN: 0, curAvg: 1, curMin: 0.5, curMax: 2, curN: 1, powAvg: 10, powMin: 5, powMax: 15, powN: 1, socAvg: null, socMin: null, socMax: null, socN: 0 },
+        { packIndex: 0, t: t("10:05:00"), tempAvg: 25.123456, tempMin: 25, tempMax: 26, tempN: 1, curAvg: -1, curMin: -2, curMax: 0, curN: 1, powAvg: -50, powMin: -60, powMax: -40, powN: 1, socAvg: 69.5, socMin: 69, socMax: 70, socN: 2 },
+        { packIndex: 0, t: t("10:00:00"), tempAvg: 24, tempMin: 23, tempMax: 25, tempN: 1, curAvg: null, curMin: null, curMax: null, curN: 0, powAvg: -40, powMin: -41, powMax: -39, powN: 1, socAvg: null, socMin: null, socMax: null, socN: 0 },
       ],
       ["temperature", "current", "power"],
     );
@@ -77,9 +78,28 @@ describe("baris -> seri", () => {
     expect(s[1].points).toHaveLength(1); // arus 10:00 null dibuang
   });
   it("raw: min/max null; metrik yang tidak diminta tidak muncul", () => {
-    const s = packRawToSeries([{ packIndex: 0, t: t("10:00:00"), temperature: 25, current: -1, power: -50 }], ["power"]);
+    const s = packRawToSeries([{ packIndex: 0, t: t("10:00:00"), temperature: 25, current: -1, power: -50, soc: 69 }], ["power"]);
     expect(s).toHaveLength(1);
     expect(s[0].points[0]).toEqual({ t: "2026-09-21T10:00:00.000Z", v: -50, min: null, max: null });
+  });
+  it("soc: seri % per pack; soc null di-skip (BUKAN 0); tanpa metrik soc tidak muncul", () => {
+    const rows = [
+      { packIndex: 0, t: t("10:00:00"), temperature: 25, current: 0, power: 0, soc: 69 },
+      { packIndex: 0, t: t("10:01:00"), temperature: 25, current: 0, power: 0, soc: null },
+      { packIndex: 1, t: t("10:00:00"), temperature: 25, current: 0, power: 0, soc: null },
+    ];
+    const s = packRawToSeries(rows, ["soc"]);
+    expect(s).toHaveLength(1); // pack 1 tidak punya soc sama sekali -> tidak ada seri
+    expect(s[0]).toMatchObject({ packIndex: 0, metric: "soc", unit: "%" });
+    expect(s[0].points).toEqual([{ t: "2026-09-21T10:00:00.000Z", v: 69, min: null, max: null }]);
+    expect(packRawToSeries(rows, ["temperature"]).some((x) => x.metric === "soc")).toBe(false);
+  });
+  it("soc agregat: avg/min/max dari rollup/raw", () => {
+    const s = packAggToSeries(
+      [{ packIndex: 0, t: t("10:00:00"), tempAvg: null, tempMin: null, tempMax: null, tempN: 0, curAvg: null, curMin: null, curMax: null, curN: 0, powAvg: null, powMin: null, powMax: null, powN: 0, socAvg: 68.5, socMin: 68, socMax: 69, socN: 2 }],
+      ["soc"],
+    );
+    expect(s[0].points[0]).toEqual({ t: "2026-09-21T10:00:00.000Z", v: 68.5, min: 68, max: 69 });
   });
   it("cell: seri per (pack, cell), scope cell, satuan V", () => {
     const s = cellAggToSeries([
@@ -93,7 +113,7 @@ describe("baris -> seri", () => {
 describe("merge bucket lintas batas rollup/raw", () => {
   const t = new Date("2026-09-21T10:00:00Z");
   const row = (o: Partial<Parameters<typeof mergePackAgg>[0][0]>) => ({
-    packIndex: 0, t, tempAvg: null, tempMin: null, tempMax: null, tempN: 0, curAvg: null, curMin: null, curMax: null, curN: 0, powAvg: null, powMin: null, powMax: null, powN: 0, ...o,
+    packIndex: 0, t, tempAvg: null, tempMin: null, tempMax: null, tempN: 0, curAvg: null, curMin: null, curMax: null, curN: 0, powAvg: null, powMin: null, powMax: null, powN: 0, socAvg: null, socMin: null, socMax: null, socN: 0, ...o,
   });
   it("rata-rata berbobot eksak, min/max gabungan, count dijumlah", () => {
     // 3 sampel rata-rata 10 (rollup) + 1 sampel bernilai 30 (raw) -> (30+30)/4 = 15
@@ -105,6 +125,13 @@ describe("merge bucket lintas batas rollup/raw", () => {
     expect(m.powMin).toBe(8);
     expect(m.powMax).toBe(30);
     expect(m.powN).toBe(4);
+  });
+  it("soc: berbobot juga", () => {
+    const [m] = mergePackAgg([row({ socAvg: 60, socMin: 59, socMax: 61, socN: 3 }), row({ socAvg: 64, socMin: 64, socMax: 64, socN: 1 })]);
+    expect(m.socAvg).toBe(61);
+    expect(m.socMin).toBe(59);
+    expect(m.socMax).toBe(64);
+    expect(m.socN).toBe(4);
   });
   it("bucket berbeda tidak digabung; metrik null di satu sisi memakai sisi lain", () => {
     const out = mergePackAgg([row({ tempAvg: 20, tempMin: 20, tempMax: 20, tempN: 2 }), row({ t: new Date(t.getTime() + 300_000), tempAvg: 22, tempMin: 22, tempMax: 22, tempN: 1 }), row({ tempAvg: null })]);

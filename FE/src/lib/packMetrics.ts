@@ -120,6 +120,45 @@ export function isSocReliable(current: number | null | undefined): boolean {
   return Math.abs(current) <= SOC_LOAD_THRESHOLD_A;
 }
 
+// SoC dari coulomb counter BMS (nullable). NaN / di luar 0–100 / null / undefined = tidak ada (BUKAN 0).
+export function bmsSocPercent(soc: number | null | undefined): number | null {
+  if (soc == null || !Number.isFinite(soc) || soc < 0 || soc > 100) return null;
+  return soc;
+}
+
+export type PackSoc = {
+  /** SoC BMS (coulomb counter), null bila tidak dikirim. */
+  bms: number | null;
+  /** SoC estimasi voltage-based (selalu dihitung bila ada cell). */
+  estimate: number | null;
+  /** Nilai utama untuk tampilan: BMS bila ada, selain itu estimasi (perilaku lama). */
+  primary: number | null;
+  source: "bms" | "estimate" | null;
+};
+
+export function resolvePackSoc(bmsSoc: number | null | undefined, packVoltage: number, cellCount: number): PackSoc {
+  const bms = bmsSocPercent(bmsSoc);
+  const estimate = estimateSocPercent(packVoltage, cellCount);
+  if (bms != null) return { bms, estimate, primary: bms, source: "bms" };
+  return { bms: null, estimate, primary: estimate, source: estimate != null ? "estimate" : null };
+}
+
+// "20.7 / 30.0 Ah". Null bila keduanya tidak ada; sisi yang hilang ditulis "—" (bukan 0).
+export function formatCapacityAh(remaining: number | null | undefined, capacity: number | null | undefined): string | null {
+  const ok = (v: number | null | undefined): v is number => v != null && Number.isFinite(v) && v >= 0;
+  if (!ok(remaining) && !ok(capacity)) return null;
+  return `${ok(remaining) ? remaining.toFixed(1) : "—"} / ${ok(capacity) ? capacity.toFixed(1) : "—"} Ah`;
+}
+
+export type BalancerState = "balancing" | "idle" | "unknown";
+
+// balancerConnected = terhubung; balancing = sedang aktif. "Active" TIDAK boleh tampil bila balancing=false.
+// balancing null/undefined (perangkat lama) -> "unknown": FE hanya menampilkan status koneksi.
+export function balancerState(balancing: boolean | null | undefined): BalancerState {
+  if (balancing == null) return "unknown";
+  return balancing ? "balancing" : "idle";
+}
+
 // Deviasi tiap cell dari rata-rata pack, dalam mV. Dipakai diverging bar & digital twin.
 export function cellDeviationsMv(
   cells: readonly CellReading[],

@@ -4,11 +4,15 @@ import paho.mqtt.client as mqtt
 BROKER     = os.environ.get("MQTT_BROKER_HOST", "72.61.208.150")
 PORT       = int(os.environ.get("MQTT_BROKER_PORT", "1883"))
 USERNAME   = os.environ.get("MQTT_USERNAME", "esp32_device")
-PASSWORD   = os.environ.get("MQTT_PASSWORD", "eo6eCnnnY1K2YrJ1PgDwLH6")
+PASSWORD   = os.environ.get("MQTT_PASSWORD", "")          # WAJIB dari env, tanpa default
 DEVICE_ID  = os.environ.get("DEVICE_ID", "GAMA-BMS-PACK-001")
 INTERVAL   = int(os.environ.get("PUBLISH_INTERVAL", "10"))
 PACK_COUNT = int(os.environ.get("PACK_COUNT", "1"))
 CELL_COUNT = int(os.environ.get("CELL_COUNT", "24"))      # cell per pack
+CAPACITY_AH = float(os.environ.get("CAPACITY_AH", "30.0"))  # kapasitas setting BMS (Ah)
+BALANCE_DELTA_MV = float(os.environ.get("BALANCE_DELTA_MV", "10"))  # balancing aktif bila delta cell > ini
+# TEMP_PROBE=0 -> kirim temperature=null (probe NTC belum terpasang), seperti JK-BMS di lapangan
+TEMP_PROBE = os.environ.get("TEMP_PROBE", "1") != "0"
 
 if not PASSWORD:
     sys.exit("MQTT_PASSWORD wajib diisi lewat environment")
@@ -26,6 +30,7 @@ class Pack:
         self.base_v = random.uniform(3.28, 3.34)
         self.current = random.choice([-1, 1]) * random.uniform(1.0, 3.0)
         self.temp = random.uniform(25.5, 27.0)
+        self.soc = random.uniform(40.0, 80.0)  # % — coulomb counter simulasi
 
     def step(self):
         self.current += random.uniform(-0.3, 0.3)
@@ -41,12 +46,24 @@ class Pack:
             for i in range(CELL_COUNT)
         ]
         pack_v = sum(c["voltage"] for c in cells)
+
+        # Coulomb counter: arus positif = discharging -> SoC turun; negatif = charging -> SoC naik.
+        # dSoC(%) = -I * dt(jam) / kapasitas(Ah) * 100
+        self.soc += -self.current * (INTERVAL / 3600.0) / CAPACITY_AH * 100.0
+        self.soc = max(0.0, min(100.0, self.soc))
+
+        soc_int = round(self.soc)  # JK-BMS melapor SoC bulat; sisa kapasitas konsisten dengan angka itu
+        delta_mv = (max(c["voltage"] for c in cells) - min(c["voltage"] for c in cells)) * 1000
         return {
             "index": self.index,
-            "temperature": round(self.temp, 1),
+            "temperature": round(self.temp, 1) if TEMP_PROBE else None,
             "balancerConnected": True,
             "current": round(self.current, 2),
             "power": round(pack_v * self.current, 2),
+            "soc": soc_int,
+            "remainingCapacity": round(CAPACITY_AH * soc_int / 100.0, 1),
+            "capacity": CAPACITY_AH,
+            "balancing": delta_mv > BALANCE_DELTA_MV,  # balancer hanya aktif saat ada ketidakseimbangan
             "cells": cells,
         }
 
@@ -77,7 +94,7 @@ try:
         msg = json.dumps(payload)
         info = client.publish(TOPIC, msg, qos=1)
         summary = " | ".join(
-            f"P{pk['index']} I={pk['current']:+.2f}A "
+            f"P{pk['index']} I={pk['current']:+.2f}A SoC={pk['soc']}% bal={'on' if pk['balancing'] else 'idle'} "
             f"Δ={(max(c['voltage'] for c in pk['cells']) - min(c['voltage'] for c in pk['cells'])) * 1000:.0f}mV"
             for pk in payload["packs"]
         )

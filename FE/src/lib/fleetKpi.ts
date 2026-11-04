@@ -18,7 +18,7 @@ export type FleetKpi = {
   dischargeW: number; // daya keluar (discharging), live saja, positif
   netW: number; // dischargeW - chargeW; negatif = net charging
   worst: { device: Device; deltaMv: number } | null; // imbalance terburuk, device LIVE saja
-  avgSocLive: number | null; // rata-rata SoC est. device live (null bila tak ada yang punya SoC)
+  avgSocLive: number | null; // rata-rata SoC device live (BMS bila ada, selain itu estimasi voltage) (null bila tak ada yang punya SoC)
 };
 
 export function computeFleetKpi(devices: Device[], summaries: Map<string, DeviceSummary>): FleetKpi {

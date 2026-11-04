@@ -60,11 +60,12 @@ async function rollupChunk(prisma: PrismaClient, kind: Kind, deviceId: string, f
   if (kind === "pack") {
     return prisma.$executeRaw(Prisma.sql`
       INSERT INTO "PackRollup1m" ("deviceId","packIndex","bucketStart","samples",
-        "tempAvg","tempMin","tempMax","tempCount","currentAvg","currentMin","currentMax","currentCount","powerAvg","powerMin","powerMax","powerCount")
+        "tempAvg","tempMin","tempMax","tempCount","currentAvg","currentMin","currentMax","currentCount","powerAvg","powerMin","powerMax","powerCount","socAvg","socMin","socMax","socCount")
       SELECT "deviceId","packIndex", date_trunc('minute',"recordedAt") AS b, count(*)::int,
         avg("temperature"),min("temperature"),max("temperature"),count("temperature")::int,
         avg("current"),min("current"),max("current"),count("current")::int,
-        avg("power"),min("power"),max("power"),count("power")::int
+        avg("power"),min("power"),max("power"),count("power")::int,
+        avg("soc"),min("soc"),max("soc"),count("soc")::int
       FROM "PackHistory"
       WHERE "deviceId" = ${deviceId} AND "recordedAt" >= ${ts(from)} AND "recordedAt" < ${ts(to)}
       GROUP BY 1,2,3
@@ -72,7 +73,8 @@ async function rollupChunk(prisma: PrismaClient, kind: Kind, deviceId: string, f
         "samples"=EXCLUDED."samples",
         "tempAvg"=EXCLUDED."tempAvg","tempMin"=EXCLUDED."tempMin","tempMax"=EXCLUDED."tempMax","tempCount"=EXCLUDED."tempCount",
         "currentAvg"=EXCLUDED."currentAvg","currentMin"=EXCLUDED."currentMin","currentMax"=EXCLUDED."currentMax","currentCount"=EXCLUDED."currentCount",
-        "powerAvg"=EXCLUDED."powerAvg","powerMin"=EXCLUDED."powerMin","powerMax"=EXCLUDED."powerMax","powerCount"=EXCLUDED."powerCount"`);
+        "powerAvg"=EXCLUDED."powerAvg","powerMin"=EXCLUDED."powerMin","powerMax"=EXCLUDED."powerMax","powerCount"=EXCLUDED."powerCount",
+        "socAvg"=EXCLUDED."socAvg","socMin"=EXCLUDED."socMin","socMax"=EXCLUDED."socMax","socCount"=EXCLUDED."socCount"`);
   }
   return prisma.$executeRaw(Prisma.sql`
     INSERT INTO "CellRollup1m" ("deviceId","packIndex","cellIndex","bucketStart","samples","vAvg","vMin","vMax")

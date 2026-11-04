@@ -31,12 +31,36 @@ JSON UTF-8, **maksimum 65.536 byte**. Field tak dikenal dibuang (tidak ditolak).
       "balancerConnected": true,
       "current": -1.25,
       "power": -67.3,
+      "soc": 69,
+      "remainingCapacity": 20.7,
+      "capacity": 30.0,
+      "balancing": false,
       "cells": [
         { "index": 0, "voltage": 3.31 },
         { "index": 1, "voltage": 3.32 }
       ]
     }
   ]
+}
+```
+
+Contoh dari publisher JK-BMS (Raspberry Pi) — probe suhu NTC belum terpasang, jadi `temperature` bernilai `null`:
+
+```json
+{
+  "timestamp": 1762243821485,
+  "packs": [{
+    "index": 1,
+    "temperature": null,
+    "balancerConnected": true,
+    "current": 0.0,
+    "power": 0.0,
+    "soc": 69,
+    "remainingCapacity": 20.7,
+    "capacity": 30.0,
+    "balancing": false,
+    "cells": [{ "index": 1, "voltage": 3.294 }]
+  }]
 }
 ```
 
@@ -49,11 +73,31 @@ JSON UTF-8, **maksimum 65.536 byte**. Field tak dikenal dibuang (tidak ditolak).
 | `packs[].balancerConnected` | boolean | ya | status active balancer EK-C8S5A | — |
 | `packs[].current` | number | tidak | **A**; **negatif = charging, positif = discharging** (ACS712-05B). Boleh dihilangkan/`null` | −1000 … 1000 |
 | `packs[].power` | number | tidak | **W** = tegangan pack × arus. Boleh dihilangkan/`null` | ±1.000.000 |
+| `packs[].soc` | number \| null | tidak | **%** — State of Charge dari **coulomb counter BMS** (JK-BMS). Dihilangkan/`null` = perangkat tidak mengirim | 0 … 100 |
+| `packs[].remainingCapacity` | number \| null | tidak | **Ah** — sisa kapasitas menurut BMS. Dihilangkan/`null` = tidak dikirim | 0 … 100.000 |
+| `packs[].capacity` | number \| null | tidak | **Ah** — kapasitas total (setting BMS). Dihilangkan/`null` = tidak dikirim | 0 … 100.000 |
+| `packs[].balancing` | boolean \| null | tidak | `true` = balancer **sedang aktif balancing saat ini**. Berbeda dari `balancerConnected` (hanya "terhubung"). Dihilangkan/`null` = tidak dikirim | — |
 | `packs[].cells` | array | ya | 1 … 64 cell; `cells[].index` unik per pack | — |
 | `packs[].cells[].index` | integer | ya | indeks cell, mulai 0 | 0 … 255 |
 | `packs[].cells[].voltage` | number | ya | **V** (hasil kalibrasi voltage divider) | 0 … 10 |
 
-**Tidak ada SoC/SoH** di payload (belum didefinisikan). Aplikasi tidak menampilkannya di v1.
+**Field BMS opsional (`soc`, `remainingCapacity`, `capacity`, `balancing`).** Semuanya *optional* dan *nullable*: ESP32 lama dan
+simulator yang tidak mengirimnya tetap valid. `null` diperlakukan sama dengan "tidak ada" — disimpan `NULL` di database dan
+ditampilkan sebagai "tidak tersedia", **bukan 0** (SoC 0 % adalah nilai nyata yang berbeda). Nilai di luar rentang pada tabel
+(mis. `soc: 101`, `capacity: -1`) atau tipe salah (mis. `soc: "69"`, `balancing: "yes"`) membuat **seluruh pesan ditolak**
+(`mqtt.invalid.schema`), sama seperti field lain. Hubungan antarfield (mis. `remainingCapacity ≤ capacity`) tidak divalidasi.
+Tidak ada SoH di payload.
+
+Catatan semantik:
+* `soc` berasal dari BMS (coulomb counter). UI menampilkannya sebagai **SoC (BMS)** dan tetap menampilkan estimasi voltage
+  (kurva OCV LiFePO4, kurang akurat) hanya sebagai pembanding bila `soc` ada. Bila `soc` tidak ada, UI memakai estimasi saja.
+* `balancerConnected` (wajib) = balancer terpasang/terhubung. `balancing` (opsional) = sedang menyeimbangkan sekarang. UI tidak
+  boleh menampilkan "aktif" bila `balancing = false`.
+* Pesan berikutnya yang tidak membawa field ini menimpa state terbaru menjadi `NULL` (tidak mempertahankan nilai lama yang basi).
+
+**`temperature` boleh `null`.** Pada publisher JK-BMS (Raspberry Pi) probe suhu NTC bisa belum terpasang sehingga `temperature` dikirim
+`null`. Ini kondisi normal, bukan error: pesan diterima, disimpan `NULL`, tidak menaikkan counter `mqtt.sensor_fault`. UI menampilkan
+"N/A" dan aturan alarm suhu tidak aktif untuk `null`.
 
 **Sensor suhu terputus / rusak (M0).** DS18B20 yang terlepas biasanya melapor −127 °C (dan 85 °C saat baru reset). Firmware boleh
 mengirim nilai apa adanya *atau* mengirim `null`/menghilangkan field `temperature`. Backend memperlakukannya begini:
@@ -127,5 +171,6 @@ di firmware (NVS); lalu TLS 8883 dengan domain DNS-only dan `WiFiClientSecure`.
 | Payload invalid kini ditolak (ukuran, tipe, duplikat index, rentang selain suhu) | **Cek**: pesan yang dulu lolos bisa ditolak | ya | — |
 | `temperature` boleh `null`; suhu di luar rentang → `null` (bukan tolak pesan) — **M0** | Boleh kirim `null` saat sensor terlepas; tidak wajib | ya | FE/mobile: tampilkan "sensor error"/"–" bila `null` (API: `temperature: number \| null`) |
 | Semantik `timestamp` (§3) | Disarankan NTP | ya | Waktu ISO-8601 UTC dari API |
+| Field opsional `soc`, `remainingCapacity`, `capacity`, `balancing` (coulomb counter BMS); `temperature` null untuk probe belum terpasang | Opsional — tidak wajib; publisher JK-BMS mengirimnya | ya (kolom nullable baru + migrasi `add_pack_soc_capacity_balancing`) | FE: "SoC (BMS)" + estimasi sebagai pembanding, kapasitas Ah, badge Balancing/Idle, suhu "N/A". API v1: `socPercent`, `remainingCapacityAh`, `capacityAh`, `balancing`; riwayat metric `soc` (%) |
 | Batas 64 KiB / 16 pack / 64 cell | **Cek** | ya | — |
 | ACL peran + client-id wajib + keepalive ≤ 300 dtk + batas auto-provision — **Fase M** | **Cek**: client-id tidak kosong, keepalive ≤ 300, publish hanya ke `bms/{id}/data\|status` | ya (`PROVISION_MAX_PER_HOUR`) | — |

@@ -164,6 +164,13 @@ export default function DeviceHistoryCharts({ deviceId }: { deviceId: string }) 
     data: lineFrom(pack.buckets, "tempAvg", gapMs),
   }));
 
+  // SoC BMS per pack. lineFrom membuang bucket null (perangkat tanpa coulomb counter / BE lama) sehingga
+  // tidak pernah digambar sebagai 0; pack tanpa titik sama sekali tidak dimasukkan.
+  const socSeries = (history?.packs ?? [])
+    .map((pack) => ({ name: `Pack #${pack.index}`, data: lineFrom(pack.buckets, "socAvg", gapMs) }))
+    .filter((series) => series.data.some((pt) => pt.y != null));
+  const hasSoc = socSeries.length > 0;
+
   const powerLine = lineFrom(buckets, "powerAvg", gapMs);
   const currentLine = lineFrom(buckets, "currentAvg", gapMs);
   const hasPower = powerLine.some((p) => p.y != null) || currentLine.some((p) => p.y != null);
@@ -337,6 +344,28 @@ export default function DeviceHistoryCharts({ deviceId }: { deviceId: string }) 
                 </div>
               </div>
             </div>
+
+            {/* SoC (BMS) — hanya bila ada data; perangkat lama/simulator tidak mengirim soc */}
+            {hasSoc && (
+              <div className="p-4 rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/20">
+                <h4 className="text-sm font-bold text-gray-700 dark:text-white/90 mb-3">SoC (BMS) Trend per Pack</h4>
+                <div className="max-w-full overflow-x-auto custom-scrollbar">
+                  <div className="min-w-[700px]">
+                    <ReactApexChart
+                      options={{
+                        ...baseChartOptions,
+                        colors: ["#465fff", "#12b76a", "#f59e0b"],
+                        yaxis: { min: 0, max: 100, tickAmount: 5, labels: { formatter: (v: number) => `${v.toFixed(0)}%` } },
+                        tooltip: { ...baseChartOptions.tooltip, y: { formatter: (v: number) => (v == null ? "—" : `${v.toFixed(1)}%`) } },
+                      }}
+                      series={socSeries}
+                      type="line"
+                      height={240}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* POWER & CURRENT */}
             <div className="p-4 rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/20">

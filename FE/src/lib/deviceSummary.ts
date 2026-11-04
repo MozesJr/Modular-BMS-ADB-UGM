@@ -3,7 +3,7 @@
 // + util derivasi/health/alarm bersama, supaya angka tidak beda-beda antar komponen.
 import type { Device } from "@/types/device";
 import { getFreshness, resolveLastSeenMs, hasNeverReportedData, type FreshnessResult } from "@/lib/freshness";
-import { deriveCellStats, estimateSocPercent } from "@/lib/packMetrics";
+import { deriveCellStats, resolvePackSoc } from "@/lib/packMetrics";
 import { computeHealthScore, type HealthBreakdown } from "@/lib/healthScore";
 import { evaluateSnapshot, type Alarm } from "@/lib/alertRules";
 
@@ -20,6 +20,8 @@ export type DeviceSummary = {
   // ikut terhitung sebagai "alarm aktif".
   realAlarms: Alarm[];
   soc: number | null;
+  // Asal angka `soc`: "bms" bila SEMUA pack punya SoC BMS; "estimate" bila hanya estimasi voltage; "mixed" bila campuran.
+  socSource: "bms" | "estimate" | "mixed" | null;
   totalPower: number;
   cellCount: number;
   worstDelta: number;
@@ -39,14 +41,17 @@ export function deviceSummary(device: Device, nowMs: number): DeviceSummary {
   const alarms = evaluateSnapshot(snaps, freshness.status);
   const realAlarms = alarms.filter((a) => a.rule !== "offline");
 
-  // SoC device = rata-rata SoC per pack.
-  const socs = packs
+  // SoC device = rata-rata SoC per pack; per pack pakai SoC BMS bila ada, selain itu estimasi voltage (perilaku lama).
+  const resolved = packs
     .map((p) => {
       const s = deriveCellStats(p.cells);
-      return estimateSocPercent(s.packVoltage, s.count);
+      return resolvePackSoc(p.soc, s.packVoltage, s.count);
     })
-    .filter((v): v is number => v != null);
-  const soc = socs.length ? socs.reduce((a, b) => a + b, 0) / socs.length : null;
+    .filter((r) => r.primary != null);
+  const soc = resolved.length ? resolved.reduce((a, r) => a + (r.primary as number), 0) / resolved.length : null;
+  const bmsCount = resolved.filter((r) => r.source === "bms").length;
+  const socSource: DeviceSummary["socSource"] =
+    resolved.length === 0 ? null : bmsCount === resolved.length ? "bms" : bmsCount === 0 ? "estimate" : "mixed";
 
   // Total daya live (jumlah power pack; null diabaikan).
   const totalPower = packs.reduce((sum, p) => sum + (p.power ?? 0), 0);
@@ -57,5 +62,5 @@ export function deviceSummary(device: Device, nowMs: number): DeviceSummary {
     return d != null && d > mx ? d : mx;
   }, 0);
 
-  return { freshness, lastSeenMs, neverReported, packs, snaps, health, alarms, realAlarms, soc, totalPower, cellCount, worstDelta };
+  return { freshness, lastSeenMs, neverReported, packs, snaps, health, alarms, realAlarms, soc, socSource, totalPower, cellCount, worstDelta };
 }

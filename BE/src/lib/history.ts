@@ -5,9 +5,9 @@ import { decodeCursor } from "@/lib/cursor";
 // Logika MURNI endpoint riwayat: validasi parameter, batas titik, pemetaan baris -> seri. (SQL ada di history-store.ts)
 
 export type Bucket = "raw" | "1m" | "5m" | "1h";
-export type Metric = "temperature" | "current" | "power" | "voltage";
+export type Metric = "temperature" | "current" | "power" | "voltage" | "soc";
 
-export const PACK_METRICS: Metric[] = ["temperature", "current", "power"];
+export const PACK_METRICS: Metric[] = ["temperature", "current", "power", "soc"];
 export const DEFAULT_METRICS: Metric[] = ["temperature", "current", "power"];
 export const MAX_POINTS = 20_000; // total titik semua seri pada bucket agregat
 export const RAW_MAX_SPAN_MS = 48 * 3600_000;
@@ -17,7 +17,8 @@ export const RAW_RETENTION_DAYS_DEFAULT = 30;
 const BUCKET_SEC: Record<Exclude<Bucket, "raw">, number> = { "1m": 60, "5m": 300, "1h": 3600 };
 export const bucketSeconds = (b: Exclude<Bucket, "raw">) => BUCKET_SEC[b];
 
-const UNIT: Record<Metric, "C" | "A" | "W" | "V"> = { temperature: "C", current: "A", power: "W", voltage: "V" };
+export type Unit = "C" | "A" | "W" | "V" | "%";
+const UNIT: Record<Metric, Unit> = { temperature: "C", current: "A", power: "W", voltage: "V", soc: "%" };
 
 export interface HistoryParams {
   from: Date;
@@ -53,7 +54,7 @@ export function resolveHistoryParams(
   if (q.metrics !== undefined) {
     const parts = q.metrics.split(",").map((m) => m.trim()).filter(Boolean);
     if (parts.length === 0) throw issue("metrics", "metrics tidak boleh kosong");
-    const valid: Metric[] = ["temperature", "current", "power", "voltage"];
+    const valid: Metric[] = ["temperature", "current", "power", "voltage", "soc"];
     const bad = parts.find((m) => !valid.includes(m as Metric));
     if (bad) throw issue("metrics", `metric tidak dikenal: ${bad} (pilihan: ${valid.join(", ")})`);
     metrics = Array.from(new Set(parts)) as Metric[];
@@ -107,7 +108,7 @@ export interface SeriesOut {
   packIndex: number;
   cellIndex: number | null;
   metric: Metric;
-  unit: "C" | "A" | "W" | "V";
+  unit: Unit;
   points: { t: string; v: number; min: number | null; max: number | null }[];
 }
 
@@ -119,8 +120,9 @@ export interface PackAggRow {
   tempAvg: number | null; tempMin: number | null; tempMax: number | null; tempN: number;
   curAvg: number | null; curMin: number | null; curMax: number | null; curN: number;
   powAvg: number | null; powMin: number | null; powMax: number | null; powN: number;
+  socAvg: number | null; socMin: number | null; socMax: number | null; socN: number;
 }
-export interface PackRawRow { packIndex: number; t: Date; temperature: number | null; current: number | null; power: number | null }
+export interface PackRawRow { packIndex: number; t: Date; temperature: number | null; current: number | null; power: number | null; soc: number | null }
 export interface CellAggRow { packIndex: number; cellIndex: number; t: Date; avg: number; min: number; max: number; n: number }
 export interface CellRawRow { packIndex: number; cellIndex: number; t: Date; voltage: number }
 
@@ -137,7 +139,7 @@ class SeriesBook {
     s.points.push({ t: t.toISOString(), v: r4(v), min: min === null ? null : r4(min), max: max === null ? null : r4(max) });
   }
   result(): SeriesOut[] {
-    const order: Metric[] = ["temperature", "current", "power", "voltage"];
+    const order: Metric[] = ["temperature", "current", "power", "soc", "voltage"];
     return [...this.map.values()]
       .map((s) => ({ ...s, points: s.points.sort((a, b) => a.t.localeCompare(b.t)) }))
       .sort((a, b) => a.packIndex - b.packIndex || (a.cellIndex ?? -1) - (b.cellIndex ?? -1) || order.indexOf(a.metric) - order.indexOf(b.metric));
@@ -150,6 +152,7 @@ export function packAggToSeries(rows: PackAggRow[], metrics: Metric[]): SeriesOu
     if (metrics.includes("temperature")) book.add("pack", r.packIndex, null, "temperature", r.t, r.tempAvg, r.tempMin, r.tempMax);
     if (metrics.includes("current")) book.add("pack", r.packIndex, null, "current", r.t, r.curAvg, r.curMin, r.curMax);
     if (metrics.includes("power")) book.add("pack", r.packIndex, null, "power", r.t, r.powAvg, r.powMin, r.powMax);
+    if (metrics.includes("soc")) book.add("pack", r.packIndex, null, "soc", r.t, r.socAvg, r.socMin, r.socMax);
   }
   return book.result();
 }
@@ -160,6 +163,8 @@ export function packRawToSeries(rows: PackRawRow[], metrics: Metric[]): SeriesOu
     if (metrics.includes("temperature")) book.add("pack", r.packIndex, null, "temperature", r.t, r.temperature, null, null);
     if (metrics.includes("current")) book.add("pack", r.packIndex, null, "current", r.t, r.current, null, null);
     if (metrics.includes("power")) book.add("pack", r.packIndex, null, "power", r.t, r.power, null, null);
+    // soc null (device tanpa coulomb counter) di-skip oleh SeriesBook.add — bukan dianggap 0.
+    if (metrics.includes("soc")) book.add("pack", r.packIndex, null, "soc", r.t, r.soc, null, null);
   }
   return book.result();
 }
@@ -199,7 +204,8 @@ export function mergePackAgg(rows: PackAggRow[]): PackAggRow[] {
     const t = mergeStat({ avg: ex.tempAvg, min: ex.tempMin, max: ex.tempMax, n: ex.tempN }, { avg: r.tempAvg, min: r.tempMin, max: r.tempMax, n: r.tempN });
     const c = mergeStat({ avg: ex.curAvg, min: ex.curMin, max: ex.curMax, n: ex.curN }, { avg: r.curAvg, min: r.curMin, max: r.curMax, n: r.curN });
     const p = mergeStat({ avg: ex.powAvg, min: ex.powMin, max: ex.powMax, n: ex.powN }, { avg: r.powAvg, min: r.powMin, max: r.powMax, n: r.powN });
-    Object.assign(ex, { tempAvg: t.avg, tempMin: t.min, tempMax: t.max, tempN: t.n, curAvg: c.avg, curMin: c.min, curMax: c.max, curN: c.n, powAvg: p.avg, powMin: p.min, powMax: p.max, powN: p.n });
+    const sc = mergeStat({ avg: ex.socAvg, min: ex.socMin, max: ex.socMax, n: ex.socN }, { avg: r.socAvg, min: r.socMin, max: r.socMax, n: r.socN });
+    Object.assign(ex, { socAvg: sc.avg, socMin: sc.min, socMax: sc.max, socN: sc.n, tempAvg: t.avg, tempMin: t.min, tempMax: t.max, tempN: t.n, curAvg: c.avg, curMin: c.min, curMax: c.max, curN: c.n, powAvg: p.avg, powMin: p.min, powMax: p.max, powN: p.n });
   }
   return [...map.values()];
 }

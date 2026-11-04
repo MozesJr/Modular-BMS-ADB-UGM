@@ -1,11 +1,12 @@
 // Logika murni penurunan data tampilan dari state terbaru (Pack/Cell): tegangan pack, delta cell, online, ringkasan.
-// Tanpa SoC/SoH (belum ada di payload perangkat).
+// SoC hanya diteruskan apa adanya dari coulomb counter BMS (nullable); tidak ada estimasi di BE dan tidak ada SoH.
 
 export interface PackLike {
   index: number;
   temperature: number | null;
   current: number | null;
   power: number | null;
+  soc?: number | null; // % dari BMS; opsional supaya pemanggil lama/tes tidak wajib mengisi
   receivedAt: Date | null;
   updatedAt: Date;
   cells: { index?: number; voltage: number }[];
@@ -50,6 +51,7 @@ export interface PackSummaryOut {
   currentA: number | null;
   powerW: number | null;
   temperatureC: number | null;
+  socPercent: number | null;
   cellDeltaMv: number | null;
   cellCount: number;
 }
@@ -61,6 +63,7 @@ export function packSummary(p: PackLike): PackSummaryOut {
     currentA: p.current,
     powerW: p.power,
     temperatureC: p.temperature,
+    socPercent: p.soc ?? null,
     cellDeltaMv: cellDeltaMv(p.cells),
     cellCount: p.cells.length,
   };

@@ -26,6 +26,11 @@ export function applyRealtimeUpdate(prev: Device, update: BmsUpdatePayload): Dev
       balancerConnected: incomingPack.balancerConnected,
       current: incomingPack.current ?? null,
       power: incomingPack.power ?? null,
+      // Field BMS opsional: tidak ada di event -> null (bukan mempertahankan nilai lama yang bisa basi).
+      soc: incomingPack.soc ?? null,
+      remainingCapacity: incomingPack.remainingCapacity ?? null,
+      capacity: incomingPack.capacity ?? null,
+      balancing: incomingPack.balancing ?? null,
       cells: Array.from(cellsByIndex.values()).sort((a, b) => a.index - b.index),
       updatedAt: new Date().toISOString(),
     };

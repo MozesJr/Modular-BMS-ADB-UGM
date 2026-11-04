@@ -5,7 +5,7 @@ Dokumen ini menjelaskan **cara memakainya**: alur auth, penyimpanan token, pagin
 
 > **Cakupan saat ini (Gelombang 1):** auth token, profil, device, dashboard, riwayat, collaborator. **Belum ada** (menyusul di Gelombang 2):
 > WebSocket realtime, daftar/ack alert, registrasi device token push (FCM), indikator online berbasis LWT. Sampai saat itu gunakan
-> polling ringan + ETag (§7). Tidak ada **SoC/SoH** di API mana pun: perangkat belum mengirimnya.
+> polling ringan + ETag (§7). **SoC** hanya diteruskan dari coulomb counter BMS (`socPercent`, nullable — perangkat/simulator lama tidak mengirimnya). Tidak ada SoH, dan server tidak menghitung SoC estimasi.
 
 ---
 
@@ -17,9 +17,9 @@ Dokumen ini menjelaskan **cara memakainya**: alur auth, penyimpanan token, pagin
 | Format | JSON UTF-8. `Content-Type: application/json` pada request ber-body. |
 | Auth | `Authorization: Bearer <accessToken>` pada semua endpoint kecuali `auth/login`, `auth/refresh`, `auth/logout`, `health`. |
 | Waktu | **Selalu ISO-8601 UTC**, mis. `2026-09-21T08:15:00.000Z`. Parse sebagai UTC; tampilkan dalam zona lokal di UI. |
-| Satuan | Ada di **nama field**: `voltageV` (V), `currentA` (A), `powerW` (W), `temperatureC` (°C), `cellDeltaMv` (mV). |
+| Satuan | Ada di **nama field**: `voltageV` (V), `currentA` (A), `powerW` (W), `temperatureC` (°C), `cellDeltaMv` (mV), `socPercent` (%), `remainingCapacityAh` / `capacityAh` (Ah). |
 | Tanda arus | `currentA` **negatif = charging**, positif = discharging. `powerW` mengikuti tanda yang sama (`V × A`). |
-| Null | `temperatureC: null` = **sensor error / tidak ada pembacaan** (tampilkan "Error"/"–", bukan 0). Field null lain = data belum ada. |
+| Null | `temperatureC: null` = **tidak ada pembacaan** — probe belum terpasang atau sensor error (tampilkan "N/A"/"–", bukan 0 dan bukan alarm). `socPercent`, `remainingCapacityAh`, `capacityAh`, `balancing` `null` = perangkat tidak mengirim (jangan tampilkan 0 / "idle"). Field null lain = data belum ada. |
 | Request ID | Setiap respons membawa header `X-Request-Id` (juga di body error). Sertakan saat melapor masalah. Anda boleh mengirim `X-Request-Id` sendiri (8–64 karakter `[A-Za-z0-9._-]`). |
 | Kompatibilitas | Penambahan field/endpoint bersifat **aditif** di v1. Klien harus **mengabaikan field yang tidak dikenal** dan tidak crash pada nilai enum baru. Perubahan yang memecahkan kompatibilitas = `/api/v2`. |
 
@@ -116,7 +116,8 @@ refreshSession(): old = secureStore.read("refresh"); r = POST /auth/refresh {old
 
 **`online`** = server menerima data dalam **180 detik** terakhir; `lastSeenAt` = waktu server menerima data terakhir (bukan jam perangkat).
 Nilai dashboard (daya, suhu, delta) dihitung **dari device online saja**; kosong = `null` (bukan 0).
-Tegangan pack = jumlah tegangan seluruh cell pack. `cellDeltaMv` = cell tertinggi − terendah. Selain itu **tidak ada SoC/SoH**.
+Tegangan pack = jumlah tegangan seluruh cell pack. `cellDeltaMv` = cell tertinggi − terendah.
+Field dari coulomb counter BMS (semua **nullable**, diteruskan apa adanya dari perangkat): `socPercent` (0–100 %; di `summary.packs[]` dan `packs[]`), serta di `packs[]` detail: `remainingCapacityAh`, `capacityAh` (Ah) dan `balancing` (`true` = balancer sedang aktif balancing; beda dari `balancerConnected` yang hanya berarti terhubung). Tidak ada SoH.
 
 ### Pagination (cursor)
 ```
@@ -133,7 +134,7 @@ GET /devices?limit=20&cursor=eyJj…   → halaman berikutnya
 ## 4. Riwayat (time-series)
 
 ```
-GET /devices/{id}/history?from=&to=&bucket=raw|1m|5m|1h&metrics=temperature,current,power,voltage&packIndex=&limit=&cursor=
+GET /devices/{id}/history?from=&to=&bucket=raw|1m|5m|1h&metrics=temperature,current,power,voltage,soc&packIndex=&limit=&cursor=
 ```
 Respons: `series[]`, tiap seri = `{ scope: pack|cell, packIndex, cellIndex|null, metric, unit, points:[{t, v, min, max}] }`.
 `v` = nilai (raw) atau **rata-rata bucket**; `min`/`max` hanya untuk bucket agregat (raw: `null`). Bucket tanpa sampel **tidak muncul** (jangan asumsikan titik rapat — gambar celah).
@@ -141,9 +142,10 @@ Respons: `series[]`, tiap seri = `{ scope: pack|cell, packIndex, cellIndex|null,
 | Metrik | Level | Satuan |
 |---|---|---|
 | `temperature`, `current`, `power` | per **pack** | °C, A, W |
+| `soc` | per **pack** (SoC BMS; opsional) | % |
 | `voltage` | per **cell** (banyak seri) | V |
 
-**Default:** 24 jam terakhir, `bucket=5m`, metrics `temperature,current,power`. `voltage` harus diminta eksplisit.
+**Default:** 24 jam terakhir, `bucket=5m`, metrics `temperature,current,power`. `voltage` dan `soc` harus diminta eksplisit. Sampel dengan `soc` (atau `temperature`) `null` **dibuang**, bukan dianggap 0; pack tanpa data `soc` sama sekali tidak punya seri `soc`.
 
 ### Memilih bucket
 | Rentang tampilan | Bucket | Titik/seri (kira-kira) |
@@ -290,5 +292,5 @@ curl -s "https://<host>/api/v1/devices/<id>/history?bucket=5m&metrics=power" -H 
 - [ ] Hapus semua token saat logout dan saat menerima kode sesi-berakhir (§1).
 - [ ] Refresh single-flight; jangan retry refresh yang responsnya tidak diketahui (§2).
 - [ ] WS: kredensial hanya di header `Authorization`, tidak di URL; tangani close 4401 (refresh lalu reconnect) dan jangan reconnect rapat saat 403/429 (§7).
-- [ ] Tampilkan `temperatureC: null` sebagai "sensor error", bukan 0 °C.
-- [ ] Jangan menampilkan SoC/SoH atau angka turunan yang tidak ada di API.
+- [ ] Tampilkan `temperatureC: null` sebagai "N/A", bukan 0 °C dan bukan alarm suhu.
+- [ ] `socPercent` / `remainingCapacityAh` / `capacityAh` / `balancing` bisa `null`: tampilkan "–", jangan 0 atau "idle". Jangan menampilkan SoH atau angka turunan lain yang tidak ada di API.
