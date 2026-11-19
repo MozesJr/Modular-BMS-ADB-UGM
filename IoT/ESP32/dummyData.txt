@@ -1,0 +1,879 @@
+/*
+  ============================================================================
+  BMS Dummy Display — ESP32 + ILI9341 (320x240) + 6 tombol
+  Untuk uji vibrasi enclosure Modular Universal BMS.
+  ============================================================================
+  Data dummy = snapshot JK-BMS asli via UART (04/11/2026 15:03):
+    24S LiFePO4, 79.02 V, 0.0 A, SOC 69 %, kapasitas 30 Ah, cycles 0,
+    MOS 24 C, T1/T2 tidak terbaca (probe NTC belum terpasang),
+    CHG ON, DSG ON, balancing OFF, delta cell 8 mV.
+
+  Library (Arduino Library Manager):
+    - Adafruit ILI9341
+    - Adafruit GFX Library
+  Board: "ESP32 Dev Module" (esp32 core 2.x / 3.x)
+
+  Mapping tombol (sesuai bentuk lubang di enclosure):
+    ▲  UP      : halaman sebelumnya / cell sebelumnya (tahan = auto-repeat)
+    ▼  DOWN    : halaman berikutnya / cell berikutnya (tahan = auto-repeat)
+    ▬  ENTER   : masuk mode pilih cell -> detail cell
+    ✕  BACK    : kembali satu level
+    □  RESET   : tekan = reset statistik min/max + ke Summary
+                 tahan 3 dtk = reset juga boot counter (NVS)
+    ○  RESTART : tahan 2 dtk = ESP.restart()  (tekan singkat tidak ngapa-ngapain,
+                 supaya getaran tidak memicu restart)
+
+  Halaman: Summary -> Cells (grid 24) -> Chart -> Proteksi -> Sistem
+  ============================================================================
+*/
+
+#include <Arduino.h>
+#include <SPI.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ILI9341.h>
+#include <Preferences.h>
+#include <esp_system.h>
+#include <stdarg.h>
+
+// =============================== KONFIGURASI ================================
+// --- TFT ILI9341 (hardware SPI / VSPI: SCK=18, MOSI=23, MISO=19) ---
+#define TFT_CS        5
+#define TFT_DC        2
+#define TFT_RST       4
+#define TFT_BL        -1          // pin backlight (LED), -1 = LED langsung ke 3V3
+#define TFT_ROTATION  1           // 1 = landscape, 3 = landscape terbalik
+#define TFT_SPI_HZ    40000000    // turunkan ke 20000000 kalau gambar rusak / kabel panjang
+
+// --- Tombol (aktif LOW, pakai INPUT_PULLUP, tombol ke GND) ---
+#define PIN_BTN_UP       32
+#define PIN_BTN_DOWN     33
+#define PIN_BTN_ENTER    25
+#define PIN_BTN_BACK     26
+#define PIN_BTN_RESET    27
+#define PIN_BTN_RESTART  14
+
+// --- Perilaku UI (padanan setting Raspi) ---
+#define PAGE_INTERVAL_MS   8000UL   // TFT_PAGE_INTERVAL: auto-ganti halaman, 0 = mati
+#define MANUAL_HOLD_MS     30000UL  // TFT_MANUAL_HOLD: jeda auto-ganti setelah tombol ditekan
+#define SCREENSAVER_MS     60000UL  // screensaver setelah idle, 0 = mati
+#define SAVER_SWITCH_MS    20000UL  // ganti animasi mata <-> joget
+#define UI_REFRESH_MS      500UL
+
+// --- Data dummy ---
+#define DUMMY_JITTER_MV    1        // fluktuasi acak +/- mV per cell, 0 = statis
+#define DATA_TICK_MS       1000UL
+
+// --- Tombol ---
+#define DEBOUNCE_MS        40       // dinaikkan dari 20-an karena uji vibrasi
+#define LONG_RESTART_MS    2000UL
+#define LONG_RESET_MS      3000UL
+#define REPEAT_DELAY_MS    450UL
+#define REPEAT_RATE_MS     150UL
+
+#define SERIAL_LOG_MS      5000UL
+// ============================================================================
+
+Adafruit_ILI9341 tft(TFT_CS, TFT_DC, TFT_RST);
+Preferences prefs;
+
+// ------------------------------- Warna --------------------------------------
+#define C_BG      ILI9341_BLACK
+#define C_HEAD    0x10A2
+#define C_PANEL   0x18E3
+#define C_LINE    0x39E7
+#define C_DIM     0x8410
+#define C_TXT     ILI9341_WHITE
+#define C_ACC     0x07FF   // cyan
+#define C_OK      0x07E0
+#define C_WARN    0xFD20
+#define C_BAD     0xF800
+#define C_SEL     ILI9341_YELLOW
+#define C_MAXC    0x5EEB   // hijau muda
+#define C_MINC    0xFC60   // oranye
+
+// ============================== DATA DUMMY ==================================
+const int CELL_COUNT = 24;
+const uint16_t SNAP_CELL_MV[CELL_COUNT] = {
+  3294, 3294, 3294, 3294, 3294, 3294, 3294, 3294, 3294, 3294, 3294, 3294,
+  3294, 3294, 3294, 3289, 3289, 3286, 3294, 3291, 3294, 3294, 3294, 3294
+};
+
+struct BmsSettings {
+  float cellOvp = 3.650, cellOvpRec = 3.450, cellUvp = 2.500, cellUvpRec = 2.900;
+  float packOvp = 87.60, packUvp = 60.00, balStart = 3.000;
+  uint16_t diffProtMv = 300, balTrigMv = 10;
+  float ocpDsg = 80, ocpChg = 80, capacityAh = 30;
+} SET;
+
+struct Bms {
+  uint16_t cellMv[CELL_COUNT];
+  float current = 0.0;
+  uint8_t soc = 69;
+  uint16_t cycles = 0;
+  float mosTemp = 24;
+  float t1 = NAN, t2 = NAN;
+  bool chg = true, dsg = true, bal = false;
+  const char* fw = "S23.06";
+  // turunan
+  float packV = 0, avgMv = 0;
+  uint16_t maxMv = 0, minMv = 0;
+  uint8_t maxIdx = 0, minIdx = 0;
+} bms;
+
+uint16_t seenMin[CELL_COUNT], seenMax[CELL_COUNT];
+
+void computeDerived() {
+  uint32_t sum = 0;
+  bms.maxMv = 0; bms.minMv = 65535;
+  for (int i = 0; i < CELL_COUNT; i++) {
+    uint16_t v = bms.cellMv[i];
+    sum += v;
+    if (v > bms.maxMv) { bms.maxMv = v; bms.maxIdx = i; }
+    if (v < bms.minMv) { bms.minMv = v; bms.minIdx = i; }
+    if (v < seenMin[i]) seenMin[i] = v;
+    if (v > seenMax[i]) seenMax[i] = v;
+  }
+  bms.packV = sum / 1000.0f;
+  bms.avgMv = (float)sum / CELL_COUNT;
+}
+
+void resetStats() {
+  for (int i = 0; i < CELL_COUNT; i++) { seenMin[i] = 65535; seenMax[i] = 0; }
+  computeDerived();
+}
+
+void tickData() {
+  for (int i = 0; i < CELL_COUNT; i++) {
+    int j = DUMMY_JITTER_MV > 0 ? (int)random(-DUMMY_JITTER_MV, DUMMY_JITTER_MV + 1) : 0;
+    bms.cellMv[i] = SNAP_CELL_MV[i] + j;
+  }
+  computeDerived();
+}
+
+// =============================== TOMBOL =====================================
+enum BtnId { B_UP, B_DOWN, B_ENTER, B_BACK, B_RESET, B_RESTART, B_COUNT };
+const char* BTN_NAME[B_COUNT]  = {"UP", "DOWN", "ENTER", "BACK", "RESET", "RESTART"};
+const char* BTN_SHORT[B_COUNT] = {"\x1E", "\x1F", "ENT", "BCK", "RST", "RBT"};
+const uint8_t BTN_PIN[B_COUNT] = {PIN_BTN_UP, PIN_BTN_DOWN, PIN_BTN_ENTER,
+                                  PIN_BTN_BACK, PIN_BTN_RESET, PIN_BTN_RESTART};
+
+enum BtnEvt { EV_DOWN, EV_REPEAT, EV_LONG, EV_UP };
+
+struct Button {
+  bool stable = false, raw = false, longDone = false, swallow = false;
+  uint32_t lastEdge = 0, downAt = 0, nextRepeat = 0, lastPressAt = 0;
+  uint32_t count = 0;
+} btn[B_COUNT];
+
+void handleButton(BtnId id, BtnEvt ev, uint32_t heldMs);
+
+void pollButtons(uint32_t now) {
+  for (int i = 0; i < B_COUNT; i++) {
+    Button& b = btn[i];
+    bool r = digitalRead(BTN_PIN[i]) == LOW;
+    if (r != b.raw) { b.raw = r; b.lastEdge = now; }
+    if (r != b.stable && now - b.lastEdge >= DEBOUNCE_MS) {
+      b.stable = r;
+      if (r) {
+        b.downAt = now; b.longDone = false; b.swallow = false;
+        b.nextRepeat = now + REPEAT_DELAY_MS;
+        b.count++; b.lastPressAt = now;
+        handleButton((BtnId)i, EV_DOWN, 0);
+      } else {
+        handleButton((BtnId)i, EV_UP, now - b.downAt);
+      }
+    }
+    if (b.stable) {
+      uint32_t longMs = (i == B_RESTART) ? LONG_RESTART_MS : LONG_RESET_MS;
+      if (!b.longDone && now - b.downAt >= longMs) {
+        b.longDone = true;
+        handleButton((BtnId)i, EV_LONG, now - b.downAt);
+      }
+      if (now >= b.nextRepeat) {
+        b.nextRepeat = now + REPEAT_RATE_MS;
+        handleButton((BtnId)i, EV_REPEAT, now - b.downAt);
+      }
+    }
+  }
+}
+
+// ============================ STATE UI ======================================
+enum Page { PG_SUMMARY, PG_CELLS, PG_CHART, PG_PROT, PG_SYS, PG_COUNT };
+const char* PAGE_TITLE[PG_COUNT] = {"Summary", "Cells", "Cell Chart", "Proteksi", "Sistem"};
+enum Mode { M_PAGE, M_SELECT, M_DETAIL, M_SAVER };
+
+Page page = PG_SUMMARY;
+Mode mode = M_PAGE;
+int cursor = 0;
+bool needFull = true;
+uint32_t lastInputAt = 0, manualUntil = 0, lastPageChange = 0;
+uint32_t bootCount = 0;
+const char* resetReasonStr = "?";
+
+char toastMsg[48] = "";
+uint16_t toastColor = C_ACC;
+uint32_t toastUntil = 0;
+bool toastShown = false;
+
+int W, H;
+
+// ============================ HELPER GAMBAR =================================
+void txt(int x, int y, uint8_t sz, uint16_t fg, uint16_t bg, const char* s) {
+  tft.setTextSize(sz);
+  tft.setTextColor(fg, bg);
+  tft.setCursor(x, y);
+  tft.print(s);
+}
+
+// Teks rata kiri, di-pad spasi sampai `pad` karakter (menimpa teks lama tanpa flicker)
+void txtf(int x, int y, uint8_t sz, uint16_t fg, uint16_t bg, int pad, const char* fmt, ...) {
+  char buf[64];
+  va_list ap; va_start(ap, fmt); vsnprintf(buf, sizeof(buf), fmt, ap); va_end(ap);
+  int n = strlen(buf);
+  while (n < pad && n < (int)sizeof(buf) - 1) buf[n++] = ' ';
+  buf[n] = 0;
+  txt(x, y, sz, fg, bg, buf);
+}
+
+// Teks rata kanan dengan lebar tetap `pad` karakter, berakhir di xr
+void txtR(int xr, int y, uint8_t sz, uint16_t fg, uint16_t bg, int pad, const char* fmt, ...) {
+  char raw[48], buf[64];
+  va_list ap; va_start(ap, fmt); vsnprintf(raw, sizeof(raw), fmt, ap); va_end(ap);
+  int n = strlen(raw);
+  int sp = pad > n ? pad - n : 0;
+  memset(buf, ' ', sp);
+  memcpy(buf + sp, raw, n + 1);
+  txt(xr - (sp + n) * 6 * sz, y, sz, fg, bg, buf);
+}
+
+void fmtUptime(char* out, size_t len, uint32_t ms) {
+  uint32_t s = ms / 1000;
+  snprintf(out, len, "%02lu:%02lu:%02lu", (unsigned long)(s / 3600),
+           (unsigned long)((s / 60) % 60), (unsigned long)(s % 60));
+}
+
+void fmtTemp(char* out, size_t len, float t) {
+  if (isnan(t)) snprintf(out, len, "--");
+  else snprintf(out, len, "%.0f\xF8" "C", t);
+}
+
+// ============================== HEADER/FOOTER ===============================
+void drawHeader() {
+  tft.fillRect(0, 0, W, 22, C_HEAD);
+  const char* t = PAGE_TITLE[page];
+  if (mode == M_SELECT) t = "Pilih Cell";
+  if (mode == M_DETAIL) t = "Detail Cell";
+  txt(6, 4, 2, C_TXT, C_HEAD, t);
+}
+
+void drawHeaderDynamic(uint32_t now) {
+  char up[12]; fmtUptime(up, sizeof(up), now);
+  txtR(W - 18, 3, 1, C_DIM, C_HEAD, 8, "%d/%d", page + 1, PG_COUNT);
+  txtR(W - 18, 13, 1, C_DIM, C_HEAD, 8, "%s", up);
+  bool on = (now / 500) % 2;            // heartbeat: kalau berhenti kedip = hang
+  tft.fillCircle(W - 9, 11, 4, on ? C_OK : C_HEAD);
+}
+
+void drawFooter() {
+  tft.fillRect(0, H - 16, W, 16, C_HEAD);
+  const char* h;
+  switch (mode) {
+    case M_SELECT: h = "\x1E\x1F pilih cell  ENTER detail  BACK keluar"; break;
+    case M_DETAIL: h = "\x1E\x1F cell lain  ENTER reset min/max  BACK"; break;
+    default:       h = "\x1E\x1F halaman  ENTER cell  RST reset  tahan RBT restart"; break;
+  }
+  txt(4, H - 12, 1, C_DIM, C_HEAD, h);
+  toastShown = false;
+}
+
+void toast(const char* msg, uint16_t color = C_ACC, uint32_t ms = 1800) {
+  strncpy(toastMsg, msg, sizeof(toastMsg) - 1);
+  toastColor = color;
+  toastUntil = millis() + ms;
+  if (mode == M_SAVER) return;
+  tft.fillRect(0, H - 16, W, 16, toastColor);
+  txt(4, H - 12, 1, C_BG, toastColor, toastMsg);
+  toastShown = true;
+}
+
+// ================================ HALAMAN ===================================
+// ---- Summary ----
+void chip(int x, int y, const char* label, bool on, uint16_t onColor) {
+  uint16_t bg = on ? onColor : C_PANEL;
+  uint16_t fg = on ? C_BG : C_DIM;
+  int w = strlen(label) * 6 + 10;
+  tft.fillRoundRect(x, y, w, 15, 3, bg);
+  txt(x + 5, y + 4, 1, fg, bg, label);
+}
+
+void drawSummaryStatic() {
+  txt(8, 28, 1, C_DIM, C_BG, "TEGANGAN PACK");
+  txt(200, 28, 1, C_DIM, C_BG, "SOC (BMS)");
+  const char* lbl[6] = {"ARUS", "DELTA CELL", "CELL MAX", "CELL MIN", "SISA KAPASITAS", "SUHU MOS / T1 / T2"};
+  for (int i = 0; i < 6; i++) {
+    int x = (i % 2) ? 164 : 8;
+    int y = 88 + (i / 2) * 32;
+    txt(x, y, 1, C_DIM, C_BG, lbl[i]);
+  }
+  tft.drawFastHLine(8, 84, W - 16, C_LINE);
+  int y = 196, x = 8;
+  chip(x, y, "CHG ON", bms.chg, C_OK);        x += 56;
+  chip(x, y, "DSG ON", bms.dsg, C_OK);        x += 56;
+  chip(x, y, bms.bal ? "BAL ON" : "BAL OFF", bms.bal, C_WARN); x += 62;
+  char cyc[16]; snprintf(cyc, sizeof(cyc), "CYCLE %u", bms.cycles);
+  chip(x, y, cyc, false, C_OK);               x += strlen(cyc) * 6 + 16;
+  char fwb[16]; snprintf(fwb, sizeof(fwb), "FW %s", bms.fw);
+  chip(x, y, fwb, false, C_OK);
+}
+
+
+void drawSummaryDynamic() {
+  txtf(8, 40, 4, C_TXT, C_BG, 6, "%.2f", bms.packV);
+  txt(8 + 6 * 24 + 2, 56, 2, C_DIM, C_BG, "V");
+  txtf(8, 74, 1, C_DIM, C_BG, 30, "%.1f W  |  %dS LiFePO4", bms.packV * bms.current, CELL_COUNT);
+
+  // SOC bar
+  int bx = 200, by = 40, bw = 112, bh = 30;
+  int fw = (bw - 4) * bms.soc / 100;
+  uint16_t sc = bms.soc > 50 ? C_OK : (bms.soc > 20 ? C_WARN : C_BAD);
+  tft.drawRect(bx, by, bw, bh, C_LINE);
+  tft.fillRect(bx + 2, by + 2, fw, bh - 4, sc);
+  tft.fillRect(bx + 2 + fw, by + 2, bw - 4 - fw, bh - 4, C_BG);
+  char s[8]; snprintf(s, sizeof(s), "%d%%", bms.soc);
+  tft.setTextSize(2); tft.setTextColor(C_TXT);
+  tft.setCursor(bx + (bw - strlen(s) * 12) / 2, by + 8); tft.print(s);
+
+  txtf(8, 98, 2, C_TXT, C_BG, 12, "%.2f A", bms.current);
+  uint16_t dmv = bms.maxMv - bms.minMv;
+  txtf(164, 98, 2, dmv > SET.balTrigMv ? C_WARN : C_TXT, C_BG, 12, "%u mV", dmv);
+  txtf(8, 130, 2, C_MAXC, C_BG, 12, "%.3f #%d", bms.maxMv / 1000.0, bms.maxIdx + 1);
+  txtf(164, 130, 2, C_MINC, C_BG, 12, "%.3f #%d", bms.minMv / 1000.0, bms.minIdx + 1);
+  txtf(8, 162, 2, C_TXT, C_BG, 12, "%.1f/%.0fAh", SET.capacityAh * bms.soc / 100.0, SET.capacityAh);
+  char a[10], b[10], c[10];
+  fmtTemp(a, sizeof(a), bms.mosTemp); fmtTemp(b, sizeof(b), bms.t1); fmtTemp(c, sizeof(c), bms.t2);
+  char tbuf[32]; snprintf(tbuf, sizeof(tbuf), "%s %s %s", a, b, c);
+  txtf(164, 162, 2, C_TXT, C_BG, 12, "%s", tbuf);
+
+}
+
+// ---- Cells grid ----
+const int GRID_COLS = 4;
+int gridRows() { return (CELL_COUNT + GRID_COLS - 1) / GRID_COLS; }
+
+void cellBoxRect(int i, int& x, int& y, int& w, int& h) {
+  int top = 26, bottom = H - 18;
+  w = W / GRID_COLS;
+  h = (bottom - top) / gridRows();
+  x = (i % GRID_COLS) * w;
+  y = top + (i / GRID_COLS) * h;
+}
+
+void drawCellBox(int i, bool full) {
+  int x, y, w, h; cellBoxRect(i, x, y, w, h);
+  bool sel = (mode == M_SELECT && i == cursor);
+  if (full) {
+    tft.fillRect(x + 1, y + 1, w - 2, h - 2, C_BG);
+    tft.drawRect(x + 1, y + 1, w - 2, h - 2, sel ? C_SEL : C_PANEL);
+    if (sel) tft.drawRect(x + 2, y + 2, w - 4, h - 4, C_SEL);
+    txtf(x + 5, y + 4, 1, sel ? C_SEL : C_DIM, C_BG, 3, "C%02d", i + 1);
+  }
+  const char* tag = "   ";
+  uint16_t col = C_TXT;
+  if (i == bms.maxIdx) { tag = "MAX"; col = C_MAXC; }
+  if (i == bms.minIdx) { tag = "MIN"; col = C_MINC; }
+  txt(x + w - 24, y + 4, 1, col, C_BG, tag);
+  txtf(x + 8, y + 14, 2, col, C_BG, 5, "%.3f", bms.cellMv[i] / 1000.0);
+}
+
+void drawCellsStatic() {
+  for (int i = 0; i < CELL_COUNT; i++) drawCellBox(i, true);
+}
+void drawCellsDynamic() {
+  for (int i = 0; i < CELL_COUNT; i++) drawCellBox(i, false);
+}
+
+// ---- Detail cell ----
+void drawDetailStatic() {
+  txt(8, 30, 1, C_DIM, C_BG, "TEGANGAN");
+  txt(200, 30, 1, C_DIM, C_BG, "vs RATA-RATA");
+  txt(200, 72, 1, C_DIM, C_BG, "PERINGKAT");
+  txt(8, 104, 1, C_DIM, C_BG, "MIN / MAX SEJAK RESET");
+  txt(8, 150, 1, C_DIM, C_BG, "POSISI DI RENTANG PROTEKSI");
+}
+
+void drawDetailDynamic() {
+  int i = cursor;
+  uint16_t mv = bms.cellMv[i];
+  uint16_t col = (i == bms.maxIdx) ? C_MAXC : (i == bms.minIdx) ? C_MINC : C_TXT;
+  txtf(8, 42, 2, C_ACC, C_BG, 10, "Cell %02d", i + 1);
+  txtf(8, 62, 4, col, C_BG, 5, "%.3f", mv / 1000.0);
+  txt(8 + 5 * 24 + 4, 78, 2, C_DIM, C_BG, "V");
+
+  float dev = mv - bms.avgMv;
+  txtf(200, 42, 2, fabs(dev) > SET.balTrigMv ? C_WARN : C_TXT, C_BG, 9, "%+.1f mV", dev);
+  int rank = 1;
+  for (int k = 0; k < CELL_COUNT; k++) if (bms.cellMv[k] < mv) rank++;
+  txtf(200, 84, 2, C_TXT, C_BG, 9, "%d/%d", rank, CELL_COUNT);
+  txtf(200, 104, 1, C_DIM, C_BG, 18, "(1 = paling rendah)");
+
+  txtf(8, 116, 2, C_TXT, C_BG, 22, "%.3f / %.3f V",
+       seenMin[i] / 1000.0, seenMax[i] / 1000.0);
+
+  // bar posisi: UVP .. OVP
+  int bx = 8, by = 164, bw = W - 16, bh = 18;
+  float lo = SET.cellUvp, hi = SET.cellOvp;
+  auto px = [&](float v) { return bx + (int)((v - lo) / (hi - lo) * bw); };
+  tft.fillRect(bx, by, bw, bh, C_PANEL);
+  int p = constrain(px(mv / 1000.0), bx, bx + bw - 3);
+  tft.fillRect(bx, by + 4, p - bx, bh - 8, C_ACC);
+  tft.fillRect(p, by - 3, 3, bh + 6, col);
+  int pb = px(SET.balStart), pr = px(SET.cellOvpRec);
+  tft.drawFastVLine(pb, by, bh, C_WARN);
+  tft.drawFastVLine(pr, by, bh, C_BAD);
+  tft.fillRect(0, by + bh + 2, W, 10, C_BG);
+  txtf(bx, by + bh + 4, 1, C_DIM, C_BG, 0, "%.2f", lo);
+  txtf(pb - 12, by + bh + 4, 1, C_WARN, C_BG, 0, "%.2f", SET.balStart);
+  txtf(pr - 12, by + bh + 4, 1, C_BAD, C_BG, 0, "%.2f", SET.cellOvpRec);
+  txtR(bx + bw, by + bh + 4, 1, C_DIM, C_BG, 4, "%.2f", hi);
+}
+
+// ---- Chart ----
+const int CH_X = 34, CH_Y = 30;
+int chW() { return W - CH_X - 6; }
+int chH() { return H - 18 - CH_Y - 28; }   // sisakan baris label X + baris avg
+
+void drawChartStatic() {
+  tft.drawFastVLine(CH_X - 2, CH_Y, chH(), C_LINE);
+  tft.drawFastHLine(CH_X - 2, CH_Y + chH(), chW() + 2, C_LINE);
+  int bw = chW() / CELL_COUNT;
+  for (int i = 0; i < CELL_COUNT; i++) {
+    if (i == 0 || (i + 1) % 4 == 0) {
+      char s[4]; snprintf(s, sizeof(s), "%d", i + 1);
+      int cx = CH_X + i * bw + bw / 2 - strlen(s) * 3;
+      txt(cx, CH_Y + chH() + 4, 1, C_DIM, C_BG, s);
+    }
+  }
+}
+
+void drawChartDynamic() {
+  // skala di-zoom supaya selisih beberapa mV kelihatan
+  int lo = bms.minMv - 5, hi = bms.maxMv + 5;
+  if (hi - lo < 20) { int m = (hi + lo) / 2; lo = m - 10; hi = m + 10; }
+  txtR(CH_X - 4, CH_Y, 1, C_DIM, C_BG, 5, "%.3f", hi / 1000.0);
+  txtR(CH_X - 4, CH_Y + chH() - 8, 1, C_DIM, C_BG, 5, "%.3f", lo / 1000.0);
+  int bw = chW() / CELL_COUNT, ch = chH();
+  for (int i = 0; i < CELL_COUNT; i++) {
+    int x = CH_X + i * bw + 1;
+    int bh = (int)((long)(bms.cellMv[i] - lo) * ch / (hi - lo));
+    bh = constrain(bh, 1, ch);
+    uint16_t c = (i == bms.maxIdx) ? C_MAXC : (i == bms.minIdx) ? C_MINC : C_ACC;
+    tft.fillRect(x, CH_Y, bw - 2, ch - bh, C_BG);
+    tft.fillRect(x, CH_Y + ch - bh, bw - 2, bh, c);
+  }
+  int ya = CH_Y + ch - (int)((bms.avgMv - lo) * ch / (hi - lo));
+  for (int x = CH_X; x < CH_X + chW(); x += 6) tft.drawFastHLine(x, ya, 3, C_TXT);
+  txtf(CH_X + 4, H - 18 - 10, 1, C_DIM, C_BG, 40, "avg %.1f mV  delta %u mV",
+       bms.avgMv, bms.maxMv - bms.minMv);
+}
+
+// ---- Proteksi ----
+void drawProtStatic() {
+  struct Row { const char* l; char v[20]; } r[11];
+  snprintf(r[0].v, 20, "%.3f V", SET.cellOvp);      r[0].l = "Cell OVP";
+  snprintf(r[1].v, 20, "%.3f V", SET.cellOvpRec);   r[1].l = "Cell OVP recovery";
+  snprintf(r[2].v, 20, "%.3f V", SET.cellUvp);      r[2].l = "Cell UVP";
+  snprintf(r[3].v, 20, "%.3f V", SET.cellUvpRec);   r[3].l = "Cell UVP recovery";
+  snprintf(r[4].v, 20, "%.2f V", SET.packOvp);      r[4].l = "Pack OVP";
+  snprintf(r[5].v, 20, "%.2f V", SET.packUvp);      r[5].l = "Pack UVP";
+  snprintf(r[6].v, 20, "%u mV", SET.diffProtMv);    r[6].l = "Proteksi beda cell";
+  snprintf(r[7].v, 20, "%.3f V", SET.balStart);     r[7].l = "Balancing mulai";
+  snprintf(r[8].v, 20, "%u mV", SET.balTrigMv);     r[8].l = "Balancing trigger";
+  snprintf(r[9].v, 20, "%.0f/%.0f A", SET.ocpDsg, SET.ocpChg); r[9].l = "OCP discharge/charge";
+  snprintf(r[10].v, 20, "%.0f Ah", SET.capacityAh); r[10].l = "Kapasitas";
+  for (int i = 0; i < 11; i++) {
+    int y = 27 + i * 17;
+    if (i % 2) tft.fillRect(0, y - 1, W, 17, C_PANEL);
+    uint16_t bg = (i % 2) ? C_PANEL : C_BG;
+    txt(8, y + 4, 1, C_DIM, bg, r[i].l);
+    txtR(W - 8, y, 2, C_TXT, bg, 0, "%s", r[i].v);
+  }
+}
+
+// ---- Sistem (berguna saat uji vibrasi) ----
+void drawSysStatic() {
+  const char* l[5] = {"UPTIME", "BOOT KE-", "RESET TERAKHIR", "FREE HEAP", "BUILD"};
+  for (int i = 0; i < 5; i++) txt(8, 30 + i * 22, 1, C_DIM, C_BG, l[i]);
+  txt(8, 146, 1, C_DIM, C_BG, "TES TOMBOL (jumlah tekan sejak boot)");
+  txtR(W - 8, 30 + 4 * 22 - 4, 1, C_TXT, C_BG, 0, "%s %s", __DATE__, __TIME__);
+}
+
+void drawSysButtons(uint32_t now, bool force);
+void drawSysDynamic(uint32_t now) {
+  char up[12]; fmtUptime(up, sizeof(up), now);
+  txtR(W - 8, 26, 2, C_TXT, C_BG, 10, "%s", up);
+  txtR(W - 8, 48, 2, C_TXT, C_BG, 10, "%lu", (unsigned long)bootCount);
+  bool bad = strcmp(resetReasonStr, "POWERON") && strcmp(resetReasonStr, "SW_RESTART");
+  txtR(W - 8, 70, 2, bad ? C_BAD : C_OK, C_BG, 12, "%s", resetReasonStr);
+  txtR(W - 8, 92, 2, C_TXT, C_BG, 10, "%u B", ESP.getFreeHeap());
+  drawSysButtons(now, false);
+}
+
+// chip tombol: menyala selama ditekan / 300 ms setelah ditekan. Hanya digambar ulang kalau berubah.
+int8_t sysLit[B_COUNT];
+uint32_t sysCnt[B_COUNT];
+void drawSysButtons(uint32_t now, bool force) {
+  int cw = (W - 16) / 3, chh = 30;
+  for (int i = 0; i < B_COUNT; i++) {
+    int x = 8 + (i % 3) * cw, y = 158 + (i / 3) * (chh + 4);
+    bool lit = btn[i].stable || (now - btn[i].lastPressAt < 300 && btn[i].lastPressAt);
+    if (!force && sysLit[i] == (int8_t)lit && sysCnt[i] == btn[i].count) continue;
+    sysLit[i] = lit; sysCnt[i] = btn[i].count;
+    uint16_t bg = lit ? C_SEL : C_PANEL, fg = lit ? C_BG : C_TXT;
+    tft.fillRoundRect(x, y, cw - 6, chh, 4, bg);
+    txt(x + 6, y + 4, 1, fg, bg, BTN_NAME[i]);
+    txtf(x + 6, y + 14, 2, fg, bg, 0, "%lu", (unsigned long)btn[i].count);
+  }
+}
+
+// ============================== SCREENSAVER =================================
+// Mata robot + orang joget, sama seperti versi Raspi.
+enum SaverKind { SV_EYES, SV_DANCE };
+SaverKind saverKind = SV_EYES;
+uint32_t saverStart = 0, saverFrameAt = 0, saverSwitchAt = 0;
+
+// --- mata ---
+struct EyeState { int lookX = 0, lookY = 0, open = 100; } eye, eyeDrawn;
+uint32_t nextSaccade = 0, blinkAt = 0;
+int blinkPhase = -1;
+
+void drawEyes(const EyeState& e, uint16_t color) {
+  const int ew = 70, eh = 84, gap = 40;
+  int h = max(6, eh * e.open / 100);
+  for (int s = -1; s <= 1; s += 2) {
+    int cx = W / 2 + s * (ew / 2 + gap / 2) + e.lookX;
+    int cy = H / 2 + e.lookY;
+    tft.fillRoundRect(cx - ew / 2, cy - h / 2, ew, h, min(16, h / 2), color);
+  }
+}
+
+void saverEyesFrame(uint32_t now) {
+  if (now >= nextSaccade) {
+    static const int pos[][2] = {{0,0},{-28,0},{28,0},{0,-14},{-20,10},{20,10},{0,0}};
+    int k = random(0, 7);
+    eye.lookX = pos[k][0]; eye.lookY = pos[k][1];
+    nextSaccade = now + random(900, 2600);
+  }
+  if (blinkPhase < 0 && now >= blinkAt) blinkPhase = 0;
+  if (blinkPhase >= 0) {
+    static const int seq[] = {60, 20, 5, 20, 60, 100};
+    eye.open = seq[blinkPhase++];
+    if (blinkPhase >= 6) { blinkPhase = -1; blinkAt = now + random(2500, 5500); }
+  }
+  if (memcmp(&eye, &eyeDrawn, sizeof(eye)) != 0) {
+    drawEyes(eyeDrawn, C_BG);
+    drawEyes(eye, C_ACC);
+    eyeDrawn = eye;
+  }
+}
+
+// --- joget (stick figure) ---
+struct Pose { int16_t la, ra, ll, rl, lean, bob; };  // sudut derajat (0 = ke bawah)
+const Pose POSES[] = {
+  { 150,  -150,  20, -20,  0,  0},
+  { 100,   -30,  35, -10,  6, -4},
+  {  30,  -100,  10, -35, -6, -4},
+  { 170,  -170,  25, -25,  0, -8},
+  {  60,   -60,  40,   0,  4,  0},
+  {  90,   -90,   0, -40, -4,  0},
+};
+const int POSE_N = sizeof(POSES) / sizeof(POSES[0]);
+int poseIdx = 0, poseDrawn = -1;
+
+void thickLine(int x0, int y0, int x1, int y1, uint16_t c) {
+  tft.drawLine(x0, y0, x1, y1, c);
+  tft.drawLine(x0 + 1, y0, x1 + 1, y1, c);
+  tft.drawLine(x0, y0 + 1, x1, y1 + 1, c);
+}
+
+void drawStick(int idx, uint16_t c) {
+  const Pose& p = POSES[idx];
+  int cx = W / 2 + p.lean, top = 60 + p.bob;
+  int neckY = top + 30, hipY = top + 90;
+  tft.drawCircle(cx, top + 14, 14, c);
+  tft.drawCircle(cx, top + 14, 13, c);
+  thickLine(cx, neckY, cx - p.lean / 2, hipY, c);
+  int sx = cx - p.lean / 4, sy = neckY + 12;
+  float la = radians(p.la), ra = radians(p.ra);
+  thickLine(sx, sy, sx + (int)(sin(la) * -40), sy + (int)(cos(la) * 40), c);
+  thickLine(sx, sy, sx + (int)(sin(ra) * -40), sy + (int)(cos(ra) * 40), c);
+  int hx = cx - p.lean / 2;
+  float ll = radians(p.ll), rl = radians(p.rl);
+  thickLine(hx, hipY, hx + (int)(sin(ll) * -50), hipY + (int)(cos(ll) * 50), c);
+  thickLine(hx, hipY, hx + (int)(sin(rl) * -50), hipY + (int)(cos(rl) * 50), c);
+}
+
+void saverDanceFrame() {
+  if (poseDrawn >= 0) drawStick(poseDrawn, C_BG);
+  poseIdx = (poseIdx + 1) % POSE_N;
+  drawStick(poseIdx, C_SEL);
+  poseDrawn = poseIdx;
+}
+
+void saverBegin(SaverKind k, uint32_t now) {
+  saverKind = k;
+  saverSwitchAt = now + SAVER_SWITCH_MS;
+  tft.fillScreen(C_BG);
+  eyeDrawn = EyeState(); eyeDrawn.open = -1;   // paksa gambar ulang
+  poseDrawn = -1;
+  nextSaccade = now + 800; blinkAt = now + 2000; blinkPhase = -1;
+  txt(W / 2 - 66, H - 14, 1, C_LINE, C_BG, "tekan tombol apa saja");
+}
+
+void enterSaver(uint32_t now) {
+  mode = M_SAVER;
+  saverStart = now;
+  saverBegin(SV_EYES, now);
+  Serial.println(F("[UI] screensaver ON"));
+}
+
+void exitSaver(uint32_t now) {
+  mode = M_PAGE;
+  page = PG_SUMMARY;
+  lastPageChange = now;
+  needFull = true;
+  Serial.println(F("[UI] screensaver OFF"));
+}
+
+void saverLoop(uint32_t now) {
+  if (now >= saverSwitchAt) saverBegin(saverKind == SV_EYES ? SV_DANCE : SV_EYES, now);
+  uint32_t frameMs = saverKind == SV_EYES ? 50 : 180;
+  if (now - saverFrameAt < frameMs) return;
+  saverFrameAt = now;
+  if (saverKind == SV_EYES) saverEyesFrame(now); else saverDanceFrame();
+}
+
+// ============================== NAVIGASI ====================================
+void setPage(int p) {
+  page = (Page)((p + PG_COUNT) % PG_COUNT);
+  lastPageChange = millis();
+  needFull = true;
+}
+
+void markInput(uint32_t now) {
+  lastInputAt = now;
+  manualUntil = now + MANUAL_HOLD_MS;
+}
+
+void moveCursor(int d) {
+  int old = cursor;
+  cursor = (cursor + d + CELL_COUNT) % CELL_COUNT;
+  if (mode == M_SELECT) { drawCellBox(old, true); drawCellBox(cursor, true); }
+  else if (mode == M_DETAIL) drawDetailDynamic();
+}
+
+void handleButton(BtnId id, BtnEvt ev, uint32_t heldMs) {
+  uint32_t now = millis();
+  Button& b = btn[id];
+
+  if (ev == EV_DOWN || ev == EV_LONG)
+    Serial.printf("[BTN] %-7s %s t=%lu\n", BTN_NAME[id], ev == EV_DOWN ? "press" : "LONG",
+                  (unsigned long)now);
+
+  // Bangun dari screensaver: tombol yang membangunkan "ditelan" sampai dilepas
+  if (mode == M_SAVER) {
+    if (ev == EV_DOWN) { b.swallow = true; markInput(now); exitSaver(now); }
+    return;
+  }
+  if (b.swallow) return;
+  markInput(now);
+
+  switch (id) {
+    case B_UP:
+    case B_DOWN: {
+      int d = (id == B_UP) ? -1 : 1;
+      if (ev == EV_DOWN) {
+        if (mode == M_PAGE) setPage(page + d);
+        else moveCursor(d);
+      } else if (ev == EV_REPEAT && mode != M_PAGE) {
+        moveCursor(d);
+      }
+      break;
+    }
+    case B_ENTER:
+      if (ev != EV_DOWN) break;
+      if (mode == M_PAGE) {
+        if (page == PG_SUMMARY) cursor = bms.minIdx;       // langsung ke cell terendah
+        mode = M_SELECT; page = PG_CELLS; needFull = true;
+      } else if (mode == M_SELECT) {
+        mode = M_DETAIL; needFull = true;
+      } else if (mode == M_DETAIL) {
+        seenMin[cursor] = seenMax[cursor] = bms.cellMv[cursor];
+        drawDetailDynamic();
+        toast("Min/max cell ini direset");
+      }
+      break;
+    case B_BACK:
+      if (ev != EV_DOWN) break;
+      if (mode == M_DETAIL) { mode = M_SELECT; needFull = true; }
+      else if (mode == M_SELECT) { mode = M_PAGE; needFull = true; }
+      else if (page != PG_SUMMARY) setPage(PG_SUMMARY);
+      else toast("Sudah di Summary");
+      break;
+    case B_RESET:
+      if (ev == EV_DOWN) toast("Lepas = reset stat, tahan 3s = + boot count", C_WARN, 3000);
+      else if (ev == EV_LONG) {
+        bootCount = 0; prefs.putUInt("boots", 0);
+        for (int i = 0; i < B_COUNT; i++) btn[i].count = 0;
+        resetStats();
+        mode = M_PAGE; setPage(PG_SUMMARY);
+        toast("Stat + boot count + tombol direset", C_BAD, 2500);
+        Serial.println(F("[SYS] full reset counters"));
+      } else if (ev == EV_UP && !b.longDone) {
+        resetStats();
+        mode = M_PAGE; setPage(PG_SUMMARY);
+        toast("Statistik min/max direset", C_WARN);
+        Serial.println(F("[SYS] stats reset"));
+      }
+      break;
+    case B_RESTART:
+      if (ev == EV_DOWN) toast("Tahan 2 detik untuk RESTART...", C_BAD, 2500);
+      else if (ev == EV_LONG) {
+        tft.fillScreen(C_BG);
+        txt(W / 2 - 84, H / 2 - 8, 2, C_BAD, C_BG, "RESTARTING...");
+        Serial.println(F("[SYS] restart by button"));
+        Serial.flush();
+        delay(400);
+        ESP.restart();
+      } else if (ev == EV_UP && !b.longDone) {
+        toast("Restart batal");
+      }
+      break;
+    default: break;
+  }
+}
+
+// ============================== RENDER LOOP =================================
+void renderFull(uint32_t now) {
+  tft.fillScreen(C_BG);
+  drawHeader();
+  drawHeaderDynamic(now);
+  drawFooter();
+  if (mode == M_DETAIL) { drawDetailStatic(); drawDetailDynamic(); return; }
+  switch (page) {
+    case PG_SUMMARY: drawSummaryStatic(); drawSummaryDynamic(); break;
+    case PG_CELLS:   drawCellsStatic(); break;
+    case PG_CHART:   drawChartStatic(); drawChartDynamic(); break;
+    case PG_PROT:    drawProtStatic(); break;
+    case PG_SYS:     drawSysStatic(); drawSysDynamic(now); drawSysButtons(now, true); break;
+    default: break;
+  }
+}
+
+void renderDynamic(uint32_t now) {
+  drawHeaderDynamic(now);
+  if (mode == M_DETAIL) { drawDetailDynamic(); return; }
+  switch (page) {
+    case PG_SUMMARY: drawSummaryDynamic(); break;
+    case PG_CELLS:   drawCellsDynamic(); break;
+    case PG_CHART:   drawChartDynamic(); break;
+    case PG_SYS:     drawSysDynamic(now); break;
+    default: break;
+  }
+}
+
+const char* resetReasonName(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:   return "POWERON";
+    case ESP_RST_EXT:       return "EXT_PIN";
+    case ESP_RST_SW:        return "SW_RESTART";
+    case ESP_RST_PANIC:     return "PANIC";
+    case ESP_RST_INT_WDT:   return "INT_WDT";
+    case ESP_RST_TASK_WDT:  return "TASK_WDT";
+    case ESP_RST_WDT:       return "WDT";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT:  return "BROWNOUT";
+    case ESP_RST_SDIO:      return "SDIO";
+    default:                return "UNKNOWN";
+  }
+}
+
+void serialSnapshot(uint32_t now) {
+  char up[12]; fmtUptime(up, sizeof(up), now);
+  Serial.printf("[%s] V=%.2f I=%.2f SOC=%u%% max=%.3f(#%d) min=%.3f(#%d) d=%umV heap=%u\n",
+                up, bms.packV, bms.current, bms.soc,
+                bms.maxMv / 1000.0, bms.maxIdx + 1, bms.minMv / 1000.0, bms.minIdx + 1,
+                bms.maxMv - bms.minMv, ESP.getFreeHeap());
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(50);
+
+  for (int i = 0; i < B_COUNT; i++) pinMode(BTN_PIN[i], INPUT_PULLUP);
+  if (TFT_BL >= 0) { pinMode(TFT_BL, OUTPUT); digitalWrite(TFT_BL, HIGH); }
+
+  resetReasonStr = resetReasonName(esp_reset_reason());
+  prefs.begin("bmsdummy", false);
+  bootCount = prefs.getUInt("boots", 0) + 1;
+  prefs.putUInt("boots", bootCount);
+
+  randomSeed(esp_random());
+  resetStats();
+  tickData();
+
+  tft.begin(TFT_SPI_HZ);
+  tft.setRotation(TFT_ROTATION);
+  tft.cp437(true);
+  W = tft.width(); H = tft.height();
+
+  Serial.printf("\n[BOOT] BMS dummy display | boot #%lu | reset=%s | %dx%d\n",
+                (unsigned long)bootCount, resetReasonStr, W, H);
+
+  uint32_t now = millis();
+  lastInputAt = now; lastPageChange = now; manualUntil = 0;
+  // baca keadaan awal tombol supaya tombol yang tertahan saat boot tidak dianggap tekan
+  for (int i = 0; i < B_COUNT; i++) {
+    btn[i].raw = btn[i].stable = digitalRead(BTN_PIN[i]) == LOW;
+    btn[i].swallow = btn[i].stable;
+    btn[i].longDone = true;
+  }
+  needFull = true;
+}
+
+void loop() {
+  static uint32_t lastData = 0, lastUi = 0, lastLog = 0;
+  uint32_t now = millis();
+
+  pollButtons(now);
+
+  if (now - lastData >= DATA_TICK_MS) { lastData = now; tickData(); }
+  if (now - lastLog >= SERIAL_LOG_MS) { lastLog = now; serialSnapshot(now); }
+
+  if (mode == M_SAVER) { saverLoop(now); delay(2); return; }
+
+  if (SCREENSAVER_MS > 0 && now - lastInputAt >= SCREENSAVER_MS) {
+    enterSaver(now);
+    return;
+  }
+
+  if (mode == M_PAGE && PAGE_INTERVAL_MS > 0 && now >= manualUntil &&
+      now - lastPageChange >= PAGE_INTERVAL_MS) {
+    setPage(page + 1);
+  }
+
+  if (needFull) {
+    needFull = false;
+    renderFull(now);
+    lastUi = now;
+    if (toastUntil > now) toast(toastMsg, toastColor, toastUntil - now);
+  } else if (now - lastUi >= UI_REFRESH_MS) {
+    lastUi = now;
+    renderDynamic(now);
+  } else if (page == PG_SYS && mode == M_PAGE) {
+    static uint32_t lastSys = 0;           // tes tombol lebih responsif
+    if (now - lastSys >= 30) { lastSys = now; drawSysButtons(now, false); }
+  }
+
+  if (toastShown && now >= toastUntil) drawFooter();
+  delay(2);
+}
