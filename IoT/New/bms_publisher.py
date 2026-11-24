@@ -38,6 +38,9 @@ import serial
 
 from jkbms import JKBMS
 
+from tft_ui import TFT_ENABLED, TFTUI
+
+
 # ------------------------------------------------------------------ config
 
 BROKER = os.environ.get("MQTT_BROKER_HOST", "72.61.208.150")
@@ -215,6 +218,13 @@ def main():
         PackReader(i + 1, port) for i, port in enumerate(SERIAL_PORTS)
     ]
 
+    # UI layar TFT + touch jalan di thread sendiri (halaman, swipe, screensaver)
+    ui = TFTUI() if TFT_ENABLED else None
+    if ui and ui.ok:
+        ui.start()
+    else:
+        ui = None
+
     client = make_client()
     log.info(
         "[MQTT] %s:%d as %s -> %s (%d pack: %s)",
@@ -256,7 +266,12 @@ def main():
 
             if not packs:
                 log.warning("No pack data available; nothing published")
+                if ui:
+                    ui.set_error("No Pack Connected")
                 continue
+
+            if ui:
+                ui.set_packs(packs)
 
             payload = {"timestamp": int(time.time() * 1000), "packs": packs}
             msg = json.dumps(payload)
@@ -273,6 +288,8 @@ def main():
     except KeyboardInterrupt:
         log.info("[SYSTEM] Stopping...")
     finally:
+        if ui:
+            ui.stop()
         client.loop_stop()
         client.disconnect()
         for r in readers:
